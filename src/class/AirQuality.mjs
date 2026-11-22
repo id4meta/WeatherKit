@@ -267,17 +267,17 @@ export default class AirQuality {
         const getScale = scaleName => {
             const scales = AirQuality.Config.Scales;
             switch (scaleName) {
-                case scales.CN_AQHI.weatherKitScale.name:
+                case scales.CN_AQHI?.weatherKitScale?.name:
                     return scales.CN_AQHI;
-                case scales.HK_AQHI.weatherKitScale.name:
+                case scales.HK_AQHI?.weatherKitScale?.name:
                     return scales.HK_AQHI;
-                case scales.CA_AQHI.weatherKitScale.name:
+                case scales.CA_AQHI?.weatherKitScale?.name:
                     return scales.CA_AQHI;
-                case scales.HJ6332012.weatherKitScale.name:
+                case scales.HJ6332012?.weatherKitScale?.name:
                     return scales.WAQI_InstantCast_CN;
-                case scales.EPA_NowCast.weatherKitScale.name:
+                case scales.EPA_NowCast?.weatherKitScale?.name:
                     return scales.WAQI_InstantCast_US;
-                case scales.EU_EAQI.weatherKitScale.name:
+                case scales.EU_EAQI?.weatherKitScale?.name:
                     return scales.EU_EAQI;
                 default:
                     return scales[scaleName];
