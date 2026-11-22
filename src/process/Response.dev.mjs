@@ -144,6 +144,8 @@ export async function Response($request, $response) {
                                             }
                                         }),
                                     );
+                                    // 分钟雷达确认正在下雨、实况却报无雨云况时，同步实况状况
+                                    if (syncCurrentConditionWithNextHour(body.currentWeather, body.forecastNextHour)) changed = true;
                                 }
                                 skipDefaultWrite = true;
                                 let text;
@@ -274,6 +276,7 @@ export async function Response($request, $response) {
                                             }
                                         }),
                                     );
+                                    syncCurrentConditionWithNextHour(body.currentWeather, body.forecastNextHour);
                                     rawBody = WeatherKit2.encode(ByteBuffer, body);
                                     break;
                                 }
@@ -364,6 +367,9 @@ export async function Response($request, $response) {
                                             }
                                         }),
                                     );
+                                    const effectiveCurrentWeather = patch.currentWeather ?? body.currentWeather;
+                                    const effectiveNextHour = patch.forecastNextHour ?? body.forecastNextHour;
+                                    if (syncCurrentConditionWithNextHour(effectiveCurrentWeather, effectiveNextHour)) patch.currentWeather = effectiveCurrentWeather;
                                     if (Object.keys(patch).length > 0) rawBody = WeatherKit3.encode(ByteBuffer, patch);
                                     break;
                                 }
@@ -426,6 +432,42 @@ async function InjectCurrentWeather(currentWeather, Settings, enviroments) {
     }
     Console.info("✅ InjectCurrentWeather");
     return currentWeather;
+}
+
+/**
+ * 分钟雷达确认正在下雨、实况却报无雨云况时，把实况天气状况同步为雨。
+ * 实况与分钟降水来自两条独立路径：实况取彩云 realtime skycon 分类型，分钟降水取雷达降水强度；
+ * 雨势初起时 skycon 仍可能报多云，两者无人对齐，此处仅在“分钟雷达确认此刻正在下雨、实况却报无雨”时兜底，无雨时不干预。
+ * 雨强按彩云分钟降水（mm/h）分级：ForecastNextHour mmph 表 LIGHT 下限 0.08；(0, 0.08] 的微量降水用微雨，0.08 以上统一为小雨，
+ * 不沿用 ConvertWeatherCode 把 LIGHT_RAIN 降级成微雨的口径。
+ * @param {any} currentWeather - 实况天气对象（原地修改 conditionCode）
+ * @param {any} forecastNextHour - 未来一小时分钟降水对象
+ * @returns {boolean} 是否改写了 conditionCode
+ */
+function syncCurrentConditionWithNextHour(currentWeather, forecastNextHour) {
+    if (!currentWeather || !forecastNextHour) return false;
+    const noRainConditions = new Set(["CLEAR", "MOSTLY_CLEAR", "PARTLY_CLOUDY", "MOSTLY_CLOUDY", "CLOUDY", "HAZE", "FOGGY", "WINDY"]);
+    if (!noRainConditions.has(currentWeather.conditionCode)) return false;
+    const firstMinute = Array.isArray(forecastNextHour.minutes) ? forecastNextHour.minutes[0] : undefined;
+    const firstIntensity = Number(firstMinute?.precipitationIntensity);
+    const firstSummary = Array.isArray(forecastNextHour.summary) ? forecastNextHour.summary[0] : undefined;
+    const summaryConditions = Array.isArray(firstSummary?.condition) ? firstSummary.condition : firstSummary?.condition == null ? [] : [firstSummary.condition];
+    const rainSummaryConditions = new Set(["RAIN", "DRIZZLE", "HEAVY_RAIN", "THUNDERSTORMS", "FREEZING_DRIZZLE", "POSSIBLE_DRIZZLE"]);
+    const summaryRaining = firstSummary?.clear === false && summaryConditions.some(condition => rainSummaryConditions.has(condition));
+    const rainingNow = (Number.isFinite(firstIntensity) && firstIntensity > 0) || summaryRaining;
+    if (!rainingNow) return false;
+    let nextCondition;
+    if (Number.isFinite(firstIntensity) && firstIntensity > 0) {
+        nextCondition = firstIntensity > 0.08 ? "RAIN" : "DRIZZLE";
+    } else if (firstSummary?.maxCondition === "DRIZZLE" || firstSummary?.maxCondition === "POSSIBLE_DRIZZLE") {
+        nextCondition = "DRIZZLE";
+    } else {
+        nextCondition = "RAIN";
+    }
+    if (nextCondition === currentWeather.conditionCode) return false;
+    Console.info("syncCurrentConditionWithNextHour", `conditionCode: ${currentWeather.conditionCode} -> ${nextCondition}`, `firstMinuteIntensity: ${firstIntensity}`);
+    currentWeather.conditionCode = nextCondition;
+    return true;
 }
 
 /**
@@ -900,7 +942,7 @@ async function InjectComparison(airQuality, currentIndexProvider, Settings, Cach
             }
 
             Console.error("InjectComparison", "不支持今日空气质量的标准");
-            return { metadata: { providerName: "iRingo", temporarilyUnavailable: true }, previousDayComparison: UNKNOWN };
+            return { metadata: { temporarilyUnavailable: true }, previousDayComparison: UNKNOWN };
         }
         case "QWeather": {
             const comparisonAirQuality = await qweatherComparison(isHJ6332012(currentIndexProvider, airQuality?.scale, Settings) ? airQuality?.categoryIndex : undefined);

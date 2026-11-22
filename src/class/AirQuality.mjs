@@ -180,6 +180,8 @@ export default class AirQuality {
 
         const stpConversionFactors = AirQuality.#GetStpConversionFactors(airQuality);
         const scale = AirQuality.Config.Scales[algorithm] ?? AirQuality.Config.Scales.UBA;
+        // 本地计算的指数沿用污染物数据源名，不再写入 iRingo
+        const sourceProviderName = airQuality?.metadata?.providerName;
 
         switch (algorithm) {
             case "None": {
@@ -254,6 +256,10 @@ export default class AirQuality {
                 Console.info("✅ PollutantsToUBA");
                 break;
             }
+        }
+
+        if (airQuality?.metadata?.providerName === "iRingo" && sourceProviderName) {
+            airQuality = { ...airQuality, metadata: { ...airQuality.metadata, providerName: sourceProviderName } };
         }
 
         Console.info("✅ Pollutants2AQI");
@@ -415,49 +421,14 @@ export default class AirQuality {
     }
 
     /**
-     * 为 providerName 附加空气质量标准描述。
+     * 返回空气质量对象的纯数据源名，不再附加空气质量标准描述。
      * @param {any} airQuality - 空气质量对象
      * @param {any} Settings - 全局设置对象
-     * @returns {string} 带标准描述的 providerName
+     * @returns {string} 纯数据源名
      */
     static appendScaleToProviderName(airQuality, Settings) {
-        const providerName = airQuality?.metadata?.providerName;
-        switch (providerName) {
-            case "和风天气":
-                return `${providerName}（国标，12年2月版）`;
-            case "彩云天气": {
-                const useUsa = airQuality?.scale === AirQuality.ToWeatherKitScale(AirQuality.Config.Scales.EPA_NowCast.weatherKitScale);
-                return `${providerName}（${useUsa ? "美标，18年9月版" : "国标，12年2月版"}）`;
-            }
-            case "iRingo":
-                switch (Settings?.AirQuality?.Calculate?.Algorithm) {
-                    case "EU_EAQI":
-                        return `${providerName} (ETC HE Report 2024/17)`;
-                    case "WAQI_InstantCast_US":
-                        return `${providerName} (WAQI InstantCast with EPA-454/B-24-002)`;
-                    case "WAQI_InstantCast_CN":
-                        return `${providerName} (InstantCast with HJ 633—2012)`;
-                    case "WAQI_InstantCast_CN_25_DRAFT":
-                        return `${providerName} (InstantCast with HJ 633 2025 DRAFT)`;
-                    case "CN_DEATH_AQHI":
-                        return `${providerName} (China CDC Death Risk AQHI)`;
-                    case "CA_AQHI":
-                        return `${providerName} (InstantCast with CA AQHI)`;
-                    case "HK_AQHI":
-                        return `${providerName} (InstantCast with HK AQHI)`;
-                    case "CN_DEATH_HK_AQHI":
-                        return `${providerName} (China CDC Death Risk + HK AQHI)`;
-                    case "AQHI_Multi_CN":
-                        return `${providerName} (AQHI-Multi for CN)`;
-                    case "AQHI_Multi_CN_HK":
-                        return `${providerName} (AQHI-Multi for CN+HK)`;
-                    case "UBA":
-                    default:
-                        return `${providerName} (FB001846)`;
-                }
-            default:
-                return providerName;
-        }
+        // 不再附加标尺后缀：仅返回纯数据源名。本地计算的指数由 Pollutants2AQI 改用污染物数据源名，iRingo 不再出现。
+        return airQuality?.metadata?.providerName;
     }
 
     /**

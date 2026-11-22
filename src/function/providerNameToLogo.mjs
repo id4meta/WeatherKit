@@ -32,11 +32,13 @@ export default function providerNameToLogo(providerName, version = "v2") {
             break;
         case "ColofulClouds":
         case "彩云天气":
-            providerLogo = `https://raw.githubusercontent.com/NSRingo/WeatherKit/main/images/icon/${version}/ColorfulClouds.png`;
+            // images/icon/ 只有 v1/v2，v3 及以上版本无此文件（实测 404）；此时返回空，保留苹果原生 providerLogo 或留空。
+            if (version === "v1" || version === "v2") providerLogo = `https://raw.githubusercontent.com/NSRingo/WeatherKit/main/images/icon/${version}/ColorfulClouds.png`;
             break;
         case "气象在线":
         case "WeatherOL":
-            providerLogo = `https://raw.githubusercontent.com/NSRingo/WeatherKit/main/images/icon/${version}/WeatherOL.png`;
+            // 同上：v3 及以上版本无此文件（实测 404），返回空。
+            if (version === "v1" || version === "v2") providerLogo = `https://raw.githubusercontent.com/NSRingo/WeatherKit/main/images/icon/${version}/WeatherOL.png`;
             break;
         case "QWeather":
         case "和风天气":

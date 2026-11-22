@@ -7,7 +7,7 @@ export default {
             WeatherAlerts: { Provider: "QWeatherWeb" },
             NextHour: { Provider: "ColorfulClouds" },
             AirQuality: {
-                Current: { Pollutants: { Provider: "ColorfulClouds", Units: { Replace: ["HJ6332012"], Mode: "Force_ugm3" } }, Index: { Replace: ["HJ6332012"], Provider: "Calculate", ForceCNPrimaryPollutants: true } },
+                Current: { Pollutants: { Provider: "ColorfulClouds", Units: { Replace: ["HJ6332012"], Mode: "Force_ugm3" } }, Index: { Replace: ["HJ6332012"], Provider: "ColorfulCloudsCN", ForceCNPrimaryPollutants: true } },
                 Comparison: { ReplaceWhenCurrentChange: false, Yesterday: { PollutantsProvider: "QWeather", IndexProvider: "ColorfulCloudsUS" } },
                 Calculate: { Algorithm: "WAQI_InstantCast_CN", AllowOverRange: true },
             },
