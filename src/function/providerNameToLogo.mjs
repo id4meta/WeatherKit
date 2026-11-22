@@ -1,46 +1,14 @@
-import { Console } from "@nsnanocat/util";
-
 /**
- * 根据数据源名称返回对应版本的标志；Apple、WeatherKit、空值及未知来源不补标志。
- * Return the versioned logo for a provider; Apple, WeatherKit, empty, and unknown providers do not receive a logo.
- * @param {string | null | undefined} providerName - 数据源名称。
- * Provider name.
- * @param {string} [version="v2"] - 标志资源版本。
- * Logo asset version.
- * @returns {string | undefined} 匹配的数据源标志地址。
- * Matched provider logo URL.
+ * 不再下发任何第三方图标：无论传入任何数据源名与版本，一律返回空。
+ * No third-party logos are served: always returns empty, for any provider and version.
+ * 原厂已有 providerLogo 的由调用处透传保留，响应组装末端的兜底清理会删掉透传的第三方图标链接。
+ * @param {string | null | undefined} providerName - 数据源名称（已不再用于查表）。
+ * Provider name (no longer used for lookup).
+ * @param {string} [version="v2"] - 标志资源版本（已不再使用）。
+ * Logo asset version (no longer used).
+ * @returns {undefined} 恒为空。
+ * Always undefined.
  */
 export default function providerNameToLogo(providerName, version = "v2") {
-    Console.info("☑️ providerNameToLogo", `providerName: ${providerName}`, `version: ${version}`);
-    const normalizedProviderName = providerName?.split("\n")?.[0]?.trim();
-    if (!normalizedProviderName || ["apple", "apple weather", "weatherkit"].includes(normalizedProviderName.toLowerCase())) {
-        Console.info("✅ providerNameToLogo");
-        return;
-    }
-    let providerLogo;
-    switch (normalizedProviderName) {
-        case "WAQI":
-        case "World Air Quality Index Project":
-        case "ColofulClouds":
-        case "彩云天气":
-        case "气象在线":
-        case "WeatherOL":
-            // 不再输出任何自定义图标链接（包括 v1/v2 的 GitHub-raw 图标与 waqi.info 图标），一律返回空；
-            // 原厂已有 providerLogo 的透传原厂，其余留空。
-            break;
-        case "QWeather":
-        case "和风天气":
-            providerLogo = `https://weatherkit.apple.com/assets/${version}/QWeather.png`;
-            break;
-        case "The Weather Channel":
-            providerLogo = `https://weatherkit.apple.com/assets/${version}/TWC.png`;
-            break;
-        case "BreezoMeter":
-            providerLogo = `https://weatherkit.apple.com/assets/${version}/BreezoMeter.png`;
-            break;
-        default:
-            break;
-    }
-    Console.info("✅ providerNameToLogo");
-    return providerLogo;
+    return undefined;
 }

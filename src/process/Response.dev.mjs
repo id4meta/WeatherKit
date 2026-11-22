@@ -146,6 +146,8 @@ export async function Response($request, $response) {
                                     );
                                     // 分钟雷达确认正在下雨、实况却报无雨云况时，同步实况状况
                                     if (syncCurrentConditionWithNextHour(body.currentWeather, body.forecastNextHour)) changed = true;
+                                    // 最终输出前兜底清理各数据集元数据：删第三方图标链接，第三方归属链接改苹果官方地址
+                                    if (sanitizeResponseMetadata(body)) changed = true;
                                 }
                                 skipDefaultWrite = true;
                                 let text;
@@ -277,6 +279,7 @@ export async function Response($request, $response) {
                                         }),
                                     );
                                     syncCurrentConditionWithNextHour(body.currentWeather, body.forecastNextHour);
+                                    sanitizeResponseMetadata(body);
                                     rawBody = WeatherKit2.encode(ByteBuffer, body);
                                     break;
                                 }
@@ -370,6 +373,7 @@ export async function Response($request, $response) {
                                     const effectiveCurrentWeather = patch.currentWeather ?? body.currentWeather;
                                     const effectiveNextHour = patch.forecastNextHour ?? body.forecastNextHour;
                                     if (syncCurrentConditionWithNextHour(effectiveCurrentWeather, effectiveNextHour)) patch.currentWeather = effectiveCurrentWeather;
+                                    sanitizeResponseMetadata(body, patch);
                                     if (Object.keys(patch).length > 0) rawBody = WeatherKit3.encode(ByteBuffer, patch);
                                     break;
                                 }
@@ -468,6 +472,51 @@ function syncCurrentConditionWithNextHour(currentWeather, forecastNextHour) {
     Console.info("syncCurrentConditionWithNextHour", `conditionCode: ${currentWeather.conditionCode} -> ${nextCondition}`, `firstMinuteIntensity: ${firstIntensity}`);
     currentWeather.conditionCode = nextCondition;
     return true;
+}
+
+
+const APPLE_ATTRIBUTION_URL = "https://developer.apple.com/weatherkit/data-source-attribution/";
+const THIRD_PARTY_ATTRIBUTION_PATTERN = /qweather\.com|caiyunapp\.com/i;
+
+/**
+ * 清理单个数据集的元数据：删除第三方图标链接，把第三方官网归属链接统一为苹果官方地址。
+ * 不改动 providerName、detailsUrl 与其他字段。
+ * @param {any} dataset - 单个数据集对象（如 currentWeather）
+ * @returns {boolean} 是否改动了元数据
+ */
+function sanitizeDatasetMetadata(dataset) {
+    const metadata = dataset?.metadata;
+    if (!metadata || typeof metadata !== "object") return false;
+    let changed = false;
+    if ("providerLogo" in metadata) {
+        if (metadata.providerLogo !== undefined) changed = true;
+        delete metadata.providerLogo;
+    }
+    if (typeof metadata.attributionUrl === "string" && THIRD_PARTY_ATTRIBUTION_PATTERN.test(metadata.attributionUrl)) {
+        metadata.attributionUrl = APPLE_ATTRIBUTION_URL;
+        changed = true;
+    }
+    return changed;
+}
+
+/**
+ * 最终输出前兜底清理全部六个数据集的元数据（实况、逐日、逐小时、分钟降水、空气质量、预警）。
+ * v3 二进制分支用 patch 视图：改动落在 body 原对象上时写回 patch，保证编码时生效。
+ * @param {any} body - 解码后的响应体
+ * @param {any} [patch] - v3 二进制分支的补丁对象（无补丁时不传）
+ * @returns {boolean} 是否改动了任何元数据
+ */
+function sanitizeResponseMetadata(body, patch) {
+    if (!body || typeof body !== "object") return false;
+    let changed = false;
+    for (const key of ["currentWeather", "forecastDaily", "forecastHourly", "forecastNextHour", "airQuality", "weatherAlerts"]) {
+        const effective = patch?.[key] ?? body?.[key];
+        if (sanitizeDatasetMetadata(effective)) {
+            changed = true;
+            if (patch && effective !== patch[key]) patch[key] = effective;
+        }
+    }
+    return changed;
 }
 
 /**
@@ -665,15 +714,11 @@ async function InjectAirQuality(airQuality, Settings, Caches, enviroments) {
     const weatherKitMetadata = airQuality?.metadata;
     const pollutantMetadata = injectedPollutants?.metadata;
     const indexMetadata = injectedIndex?.metadata;
-    const comparisonMetadata = injectedComparison?.metadata;
     const sourceProviderName =
         (needInjectIndex && indexMetadata?.providerName && !indexMetadata.temporarilyUnavailable ? indexMetadata.providerName : undefined)
         ?? (needPollutants && pollutantMetadata?.providerName && !pollutantMetadata.temporarilyUnavailable ? pollutantMetadata.providerName : undefined)
         ?? (weatherKitMetadata?.providerName && !weatherKitMetadata.temporarilyUnavailable ? weatherKitMetadata.providerName : undefined);
     const providerName = sourceProviderName ?? "";
-
-    // Step6. 选取首个有效 provider，生成统一 logo
-    const providerLogo = providerNameToLogo(weatherKitMetadata?.providerName || pollutantMetadata?.providerName || indexMetadata?.providerName || comparisonMetadata?.providerName);
 
     // Step7. 合并输出：优先使用可用注入结果，并统一 metadata / pollutants / previousDayComparison
     airQuality = {
@@ -682,11 +727,14 @@ async function InjectAirQuality(airQuality, Settings, Caches, enviroments) {
         metadata: {
             ...(airQuality?.metadata ? airQuality.metadata : injectedPollutants?.metadata),
             providerName,
-            ...(providerLogo ? { providerLogo } : {}),
+            // 不下发任何第三方图标或第三方官网归属链接：归属链接统一为苹果官方地址
+            attributionUrl: APPLE_ATTRIBUTION_URL,
         },
         pollutants: AirQuality.ConvertPollutants(airQuality, injectedPollutants, needInjectIndex, injectedIndex, Settings) ?? [],
         previousDayComparison: injectedComparison?.previousDayComparison ?? AirQuality.Config.CompareCategoryIndexes.UNKNOWN,
     };
+    // 展开后显式删除透传进来的 providerLogo（苹果原厂元数据可能自带第三方图标链接）
+    delete airQuality.metadata.providerLogo;
     Console.debug(`airQuality: ${JSON.stringify(airQuality, null, 2)}`);
     return airQuality;
 }
