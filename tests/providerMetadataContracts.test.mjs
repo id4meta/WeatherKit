@@ -41,12 +41,12 @@ const parameters = {
     version: "v2",
 };
 
-test("providerNameToLogo owns empty, Apple, and default-version handling", () => {
+test("providerNameToLogo always returns empty (no third-party logos are served)", () => {
     assert.equal(providerNameToLogo(), undefined);
     assert.equal(providerNameToLogo("Apple"), undefined);
     assert.equal(providerNameToLogo("Apple Weather"), undefined);
     assert.equal(providerNameToLogo("WeatherKit"), undefined);
-    assert.equal(providerNameToLogo("QWeather"), "https://weatherkit.apple.com/assets/v2/QWeather.png");
+    assert.equal(providerNameToLogo("QWeather"), undefined);
 });
 
 test("ColorfulClouds maps the API latitude-longitude response order in every weather product", async () => {

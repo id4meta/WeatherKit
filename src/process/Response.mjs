@@ -286,10 +286,12 @@ export async function Response($request, $response) {
                                 case url.pathname.startsWith("/api/v3/weather/"): {
                                     Console.info("🟪 WeatherKit.api.v3.weather");
                                     const parameters = parseWeatherKitURL(url);
-                                    // 仅解码选中的可注入产品，其余根产品保持原始 arena / Only selected injectable products are decoded; all other roots retain their original arenas.
+                                    // 解码选中的可注入产品（注入用）与仅做归属清理的非注入产品（兜底清理用）；
+                                    // 其余根产品保持原始 arena；解码失败的产品保留原始 arena，不参与注入与重写。
                                     const dataSets = parameters.dataSets.filter(dataSet => Settings.DataSets.includes(dataSet) && ["airQuality", "currentWeather", "forecastDaily", "forecastHourly", "forecastNextHour", "weatherAlerts"].includes(dataSet));
-                                    if (dataSets.length === 0) break;
-                                    const rootNames = dataSets.map(dataSet => Configs.DataSets[dataSet] ?? dataSet);
+                                    const sweepDataSets = parameters.dataSets.filter(dataSet => ["dataNotice", "forecastPeriodic", "historicalComparisons", "weatherChanges", "news"].includes(dataSet));
+                                    if (dataSets.length === 0 && sweepDataSets.length === 0) break;
+                                    const rootNames = [...dataSets, ...sweepDataSets].map(dataSet => Configs.DataSets[dataSet] ?? dataSet);
                                     const { json, failures } = WeatherKit3.decodeWithReport(ByteBuffer, rootNames);
                                     body = json;
                                     // 读取或解码失败的产品保留原始 arena，不参与注入与重写。
@@ -479,39 +481,51 @@ const APPLE_ATTRIBUTION_URL = "https://developer.apple.com/weatherkit/data-sourc
 const THIRD_PARTY_ATTRIBUTION_PATTERN = /qweather\.com|caiyunapp\.com/i;
 
 /**
- * 清理单个数据集的元数据：删除第三方图标链接，把第三方官网归属链接统一为苹果官方地址。
- * 不改动 providerName、detailsUrl 与其他字段。
- * @param {any} dataset - 单个数据集对象（如 currentWeather）
- * @returns {boolean} 是否改动了元数据
+ * 递归清理对象内所有归属/图标字段：删除 providerLogo，把命中的第三方归属链接统一为苹果官方地址。
+ * 覆盖顶层 metadata 与嵌套字段（如预警项 attributionUrl）；不改动 providerName、detailsUrl 与其他字段。
+ * @param {any} value - 待清理的对象或数组
+ * @param {Set<object>} [seen] - 已访问对象（防循环引用）
+ * @returns {boolean} 是否改动了任何字段
  */
-function sanitizeDatasetMetadata(dataset) {
-    const metadata = dataset?.metadata;
-    if (!metadata || typeof metadata !== "object") return false;
+function sanitizeResponseObject(value, seen = new Set()) {
+    if (!value || typeof value !== "object" || seen.has(value)) return false;
+    seen.add(value);
     let changed = false;
-    if ("providerLogo" in metadata) {
-        if (metadata.providerLogo !== undefined) changed = true;
-        delete metadata.providerLogo;
+    if (Array.isArray(value)) {
+        for (const item of value) if (sanitizeResponseObject(item, seen)) changed = true;
+        return changed;
     }
-    if (typeof metadata.attributionUrl === "string" && THIRD_PARTY_ATTRIBUTION_PATTERN.test(metadata.attributionUrl)) {
-        metadata.attributionUrl = APPLE_ATTRIBUTION_URL;
-        changed = true;
+    if ("providerLogo" in value) {
+        if (value.providerLogo !== undefined) changed = true;
+        delete value.providerLogo;
+    }
+    for (const key of ["attributionUrl", "attributionURL"]) {
+        if (typeof value[key] === "string" && THIRD_PARTY_ATTRIBUTION_PATTERN.test(value[key])) {
+            value[key] = APPLE_ATTRIBUTION_URL;
+            changed = true;
+        }
+    }
+    for (const key of Object.keys(value)) {
+        if (sanitizeResponseObject(value[key], seen)) changed = true;
     }
     return changed;
 }
 
 /**
- * 最终输出前兜底清理全部六个数据集的元数据（实况、逐日、逐小时、分钟降水、空气质量、预警）。
+ * 最终输出前兜底清理全部数据集的归属/图标字段：动态遍历 body 与 patch 的全部顶层键，
+ * 覆盖 11 个 dataSets 及后续新增数据集（含 dataNotice、forecastPeriodic、historicalComparisons、
+ * weatherChanges、news 等非注入产品）；嵌套字段一并清理。
  * v3 二进制分支用 patch 视图：改动落在 body 原对象上时写回 patch，保证编码时生效。
  * @param {any} body - 解码后的响应体
  * @param {any} [patch] - v3 二进制分支的补丁对象（无补丁时不传）
- * @returns {boolean} 是否改动了任何元数据
+ * @returns {boolean} 是否改动了任何字段
  */
 function sanitizeResponseMetadata(body, patch) {
     if (!body || typeof body !== "object") return false;
     let changed = false;
-    for (const key of ["currentWeather", "forecastDaily", "forecastHourly", "forecastNextHour", "airQuality", "weatherAlerts"]) {
+    for (const key of new Set([...Object.keys(body), ...(patch ? Object.keys(patch) : [])])) {
         const effective = patch?.[key] ?? body?.[key];
-        if (sanitizeDatasetMetadata(effective)) {
+        if (sanitizeResponseObject(effective)) {
             changed = true;
             if (patch && effective !== patch[key]) patch[key] = effective;
         }
