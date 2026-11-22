@@ -96,8 +96,6 @@ export async function Response($request, $response) {
                                 const parameters = parseWeatherKitURL(url);
                                 const dataSets = parameters.dataSets.filter(dataSet => Settings.DataSets.includes(dataSet) && ["airQuality", "currentWeather", "forecastDaily", "forecastHourly", "forecastNextHour", "weatherAlerts"].includes(dataSet));
                                 let changed = false;
-                                // 苹果原厂实况状况：注入覆盖前保存，反向回退时优先恢复
-                                const originalConditionCode = body.currentWeather?.conditionCode;
                                 if (dataSets.length > 0) {
                                     // REST JSON 表示沿用标量形状，供应商按标量产出 / REST JSON uses scalar shapes, so providers produce scalars.
                                     const providerParameters = { ...parameters, version: "v2", weatherKitLanguage: body.weatherAlerts?.metadata?.language };
@@ -146,8 +144,8 @@ export async function Response($request, $response) {
                                             }
                                         }),
                                     );
-                                    // 分钟雷达与实况双向对齐：雷达确认下雨时同步为雨，雷达明确无雨时保守回退
-                                    if (syncCurrentConditionWithNextHour(body.currentWeather, body.forecastNextHour, originalConditionCode)) changed = true;
+                                    // 分钟雷达确认正在下雨、实况却报无雨云况时，同步实况状况
+                                    if (syncCurrentConditionWithNextHour(body.currentWeather, body.forecastNextHour)) changed = true;
                                     // 最终输出前兜底清理各数据集元数据：删第三方图标链接，第三方归属链接改苹果官方地址
                                     if (sanitizeResponseMetadata(body)) changed = true;
                                 }
@@ -204,8 +202,6 @@ export async function Response($request, $response) {
                                     const dataSets = parameters.dataSets.filter(dataSet => Settings.DataSets.includes(dataSet));
                                     const rootNames = dataSets.map(dataSet => Configs.DataSets[dataSet] ?? dataSet);
                                     body = WeatherKit2.decode(ByteBuffer, rootNames);
-                                    // 苹果原厂实况状况：注入覆盖前保存，反向回退时优先恢复
-                                    const originalConditionCode = body.currentWeather?.conditionCode;
                                     const providerParameters = { ...parameters, weatherKitLanguage: body.weatherAlerts?.metadata?.language };
                                     const matchEnum = new MatchEnum(body, parameters.version, $request);
                                     if (Settings?.LogLevel === "DEBUG" || Settings?.LogLevel === "ALL") {
@@ -282,7 +278,7 @@ export async function Response($request, $response) {
                                             }
                                         }),
                                     );
-                                    syncCurrentConditionWithNextHour(body.currentWeather, body.forecastNextHour, originalConditionCode);
+                                    syncCurrentConditionWithNextHour(body.currentWeather, body.forecastNextHour);
                                     sanitizeResponseMetadata(body);
                                     rawBody = WeatherKit2.encode(ByteBuffer, body);
                                     break;
@@ -298,8 +294,6 @@ export async function Response($request, $response) {
                                     const rootNames = [...dataSets, ...sweepDataSets].map(dataSet => Configs.DataSets[dataSet] ?? dataSet);
                                     const { json, failures } = WeatherKit3.decodeWithReport(ByteBuffer, rootNames);
                                     body = json;
-                                    // 苹果原厂实况状况：注入覆盖前保存，反向回退时优先恢复
-                                    const originalConditionCode = body.currentWeather?.conditionCode;
                                     // 读取或解码失败的产品保留原始 arena，不参与注入与重写。
                                     // Products that fail to read or decode keep their original arenas and are neither injected nor rewritten.
                                     const failed = new Set(failures.map(failure => failure.name));
@@ -380,7 +374,7 @@ export async function Response($request, $response) {
                                     );
                                     const effectiveCurrentWeather = patch.currentWeather ?? body.currentWeather;
                                     const effectiveNextHour = patch.forecastNextHour ?? body.forecastNextHour;
-                                    if (syncCurrentConditionWithNextHour(effectiveCurrentWeather, effectiveNextHour, originalConditionCode)) patch.currentWeather = effectiveCurrentWeather;
+                                    if (syncCurrentConditionWithNextHour(effectiveCurrentWeather, effectiveNextHour)) patch.currentWeather = effectiveCurrentWeather;
                                     sanitizeResponseMetadata(body, patch);
                                     if (Object.keys(patch).length > 0) rawBody = WeatherKit3.encode(ByteBuffer, patch);
                                     break;
@@ -447,21 +441,19 @@ async function InjectCurrentWeather(currentWeather, Settings, enviroments) {
 }
 
 /**
- * 分钟雷达与实况双向对齐。
- * 正向：分钟雷达确认正在下雨、实况却报无雨云况时，把实况天气状况同步为雨。
- * 反向：实况报微雨/小雨、分钟雷达明确判定当前处于无雨窗口时，保守回退为无雨云况。
+ * 分钟雷达确认正在下雨、实况却报无雨云况时，把实况天气状况同步为雨。
  * 实况与分钟降水来自两条独立路径：实况取彩云 realtime skycon 分类型，分钟降水取雷达降水强度；
- * 两者无人对齐，此处仅在雷达证据明确时兜底，其余情况不干预。
- * 正向雨强按彩云分钟降水（mm/h）分级：ForecastNextHour mmph 表 LIGHT 下限 0.08；(0, 0.08] 的微量降水用微雨，0.08 以上统一为小雨，
+ * 雨势初起时 skycon 仍可能报多云，两者无人对齐，此处仅在“分钟雷达确认此刻正在下雨、实况却报无雨”时兜底，无雨时不干预。
+ * 雨强按彩云分钟降水（mm/h）分级：ForecastNextHour mmph 表 LIGHT 下限 0.08；(0, 0.08] 的微量降水用微雨，0.08 以上统一为小雨，
  * 不沿用 ConvertWeatherCode 把 LIGHT_RAIN 降级成微雨的口径。
  * @param {any} currentWeather - 实况天气对象（原地修改 conditionCode）
  * @param {any} forecastNextHour - 未来一小时分钟降水对象
- * @param {string} [originalConditionCode] - 苹果原厂实况状况（注入覆盖前保存），反向回退时优先恢复
  * @returns {boolean} 是否改写了 conditionCode
  */
-function syncCurrentConditionWithNextHour(currentWeather, forecastNextHour, originalConditionCode) {
+function syncCurrentConditionWithNextHour(currentWeather, forecastNextHour) {
     if (!currentWeather || !forecastNextHour) return false;
     const noRainConditions = new Set(["CLEAR", "MOSTLY_CLEAR", "PARTLY_CLOUDY", "MOSTLY_CLOUDY", "CLOUDY", "HAZE", "FOGGY", "WINDY"]);
+    if (!noRainConditions.has(currentWeather.conditionCode)) return false;
     const firstMinute = Array.isArray(forecastNextHour.minutes) ? forecastNextHour.minutes[0] : undefined;
     const firstIntensity = Number(firstMinute?.precipitationIntensity);
     const firstSummary = Array.isArray(forecastNextHour.summary) ? forecastNextHour.summary[0] : undefined;
@@ -469,42 +461,17 @@ function syncCurrentConditionWithNextHour(currentWeather, forecastNextHour, orig
     const rainSummaryConditions = new Set(["RAIN", "DRIZZLE", "HEAVY_RAIN", "THUNDERSTORMS", "FREEZING_DRIZZLE", "POSSIBLE_DRIZZLE"]);
     const summaryRaining = firstSummary?.clear === false && summaryConditions.some(condition => rainSummaryConditions.has(condition));
     const rainingNow = (Number.isFinite(firstIntensity) && firstIntensity > 0) || summaryRaining;
-    if (rainingNow) {
-        // 正向：分钟雷达确认正在下雨、实况却报无雨云况时同步为雨；实况已是雨况时不干预。
-        if (!noRainConditions.has(currentWeather.conditionCode)) return false;
-        let nextCondition;
-        if (Number.isFinite(firstIntensity) && firstIntensity > 0) {
-            nextCondition = firstIntensity > 0.08 ? "RAIN" : "DRIZZLE";
-        } else if (firstSummary?.maxCondition === "DRIZZLE" || firstSummary?.maxCondition === "POSSIBLE_DRIZZLE") {
-            nextCondition = "DRIZZLE";
-        } else {
-            nextCondition = "RAIN";
-        }
-        if (nextCondition === currentWeather.conditionCode) return false;
-        Console.info("syncCurrentConditionWithNextHour", `conditionCode: ${currentWeather.conditionCode} -> ${nextCondition}`, `firstMinuteIntensity: ${firstIntensity}`);
-        currentWeather.conditionCode = nextCondition;
-        return true;
-    }
-    // 反向：实况报微雨/小雨、分钟雷达明确判定当前处于无雨窗口时，保守回退为无雨云况。
-    // 强对流与固态降水（HEAVY_RAIN / THUNDERSTORMS / SNOW / SLEET 等）不干预。
-    if (currentWeather.conditionCode !== "DRIZZLE" && currentWeather.conditionCode !== "RAIN") return false;
-    if (firstSummary?.clear !== true) return false;
-    const minutes = forecastNextHour.minutes;
-    if (!Array.isArray(minutes) || minutes.length < 5) return false;
-    const firstFive = minutes.slice(0, 5);
-    if (!firstFive.every(minute => Number.isFinite(Number(minute?.precipitationIntensity)) && Number(minute.precipitationIntensity) <= 0)) return false;
+    if (!rainingNow) return false;
     let nextCondition;
-    if (noRainConditions.has(originalConditionCode)) {
-        nextCondition = originalConditionCode;
+    if (Number.isFinite(firstIntensity) && firstIntensity > 0) {
+        nextCondition = firstIntensity > 0.08 ? "RAIN" : "DRIZZLE";
+    } else if (firstSummary?.maxCondition === "DRIZZLE" || firstSummary?.maxCondition === "POSSIBLE_DRIZZLE") {
+        nextCondition = "DRIZZLE";
     } else {
-        const cloudCover = Number(currentWeather.cloudCover);
-        if (Number.isFinite(cloudCover) && cloudCover < 0.25) nextCondition = "MOSTLY_CLEAR";
-        else if (Number.isFinite(cloudCover) && cloudCover < 0.6) nextCondition = "PARTLY_CLOUDY";
-        else if (Number.isFinite(cloudCover) && cloudCover < 0.85) nextCondition = "MOSTLY_CLOUDY";
-        else nextCondition = "CLOUDY";
+        nextCondition = "RAIN";
     }
     if (nextCondition === currentWeather.conditionCode) return false;
-    Console.info("syncCurrentConditionWithNextHour", `conditionCode: ${currentWeather.conditionCode} -> ${nextCondition} (reverse, radar clear)`, `firstMinuteIntensity: ${firstIntensity}`);
+    Console.info("syncCurrentConditionWithNextHour", `conditionCode: ${currentWeather.conditionCode} -> ${nextCondition}`, `firstMinuteIntensity: ${firstIntensity}`);
     currentWeather.conditionCode = nextCondition;
     return true;
 }
