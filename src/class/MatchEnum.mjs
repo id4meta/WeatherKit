@@ -13,7 +13,7 @@ import { WK2, WK3 } from "@nsringo/weatherkit";
  * 通知格式：json: {jsonValue} / proto: {protoEnumIndex}-{protoValue}
  */
 export default class MatchEnum {
-    constructor(proto, version) {
+    constructor(proto, version, $request) {
         this.Name = "MatchEnum";
         this.Version = "0.0.4";
         Console.log(`🟧 ${this.Name} v${this.Version}`);

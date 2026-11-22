@@ -1,6 +1,6 @@
 import { Console } from "@nsnanocat/util";
 
-export default function parseWeatherKitURL(url = new URL($request.url)) {
+export default function parseWeatherKitURL(url) {
     Console.info("☑️ parseWeatherKitURL");
     const result = {
         version: undefined,

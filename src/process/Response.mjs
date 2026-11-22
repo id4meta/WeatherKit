@@ -199,7 +199,7 @@ export async function Response($request, $response) {
                                     const rootNames = dataSets.map(dataSet => Configs.DataSets[dataSet] ?? dataSet);
                                     body = WeatherKit2.decode(ByteBuffer, rootNames);
                                     const providerParameters = { ...parameters, weatherKitLanguage: body.weatherAlerts?.metadata?.language };
-                                    const matchEnum = new MatchEnum(body, parameters.version);
+                                    const matchEnum = new MatchEnum(body, parameters.version, $request);
                                     if (Settings?.LogLevel === "DEBUG" || Settings?.LogLevel === "ALL") {
                                         await matchEnum.init();
                                     }
@@ -290,7 +290,7 @@ export async function Response($request, $response) {
                                     // Products that fail to read or decode keep their original arenas and are neither injected nor rewritten.
                                     const failed = new Set(failures.map(failure => failure.name));
                                     const providerParameters = { ...parameters, weatherKitLanguage: body.weatherAlerts?.metadata?.language };
-                                    const matchEnum = new MatchEnum(body, parameters.version);
+                                    const matchEnum = new MatchEnum(body, parameters.version, $request);
                                     if (Settings?.LogLevel === "DEBUG" || Settings?.LogLevel === "ALL") {
                                         await matchEnum.init();
                                     }
