@@ -9,7 +9,7 @@ import setENV from "../function/setENV.mjs";
 /***************** Processing *****************/
 export async function Request($request) {
     // 构造回复数据
-    let $response = undefined;
+    let $response;
     // 解构URL
     const url = new URL($request.url);
     Console.info(`url: ${url.toJSON()}`);
@@ -74,7 +74,7 @@ export async function Request($request) {
                 case "application/grpc+proto":
                 case "application/octet-stream": {
                     //Console.debug(`$request: ${JSON.stringify($request, null, 2)}`);
-                    let rawBody = $request.bodyBytes ? new Uint8Array($request.bodyBytes) : ($request.body ?? new Uint8Array());
+                    const rawBody = $request.bodyBytes ? new Uint8Array($request.bodyBytes) : ($request.body ?? new Uint8Array());
                     //Console.debug(`isBuffer? ${ArrayBuffer.isView(rawBody)}: ${JSON.stringify(rawBody, null, 2)}`);
                     // 写入二进制数据
                     $request.body = rawBody;
@@ -113,7 +113,8 @@ export async function Request($request) {
                                     }
                                     break;
                                 }
-                                case url.pathname.startsWith("/api/v2/weather/"): {
+                                case url.pathname.startsWith("/api/v2/weather/"):
+                                case url.pathname.startsWith("/api/v3/weather/"): {
                                     // 解决 macOS 天气 app 如果使用国际版 Maps 时，country 丢失不显示未来一小时降水的问题
                                     switch (true) {
                                         case $request.headers["User-Agent"]?.startsWith("WeatherKit_Weather_macOS_Version"):
