@@ -632,6 +632,37 @@ async function InjectWeatherAlerts(weatherAlerts, Settings, enviroments) {
     return weatherAlerts;
 }
 
+
+/**
+ * 空气质量来源文案统一为单行「数据源名（标准名）」，不换行堆叠。
+ * 标准名按指数所用标尺映射（HJ6332012 → 国标 HJ 633—2012）；未列出的标尺直接用标尺名；无标尺时只返回数据源名。
+ * @param {string} providerName - 数据源名（如“彩云天气”）
+ * @param {string} [scale] - 指数标尺名（如 HJ6332012，可能带 .1 版本后缀）
+ * @returns {string} 单行来源文案（如“彩云天气（国标 HJ 633—2012）”）
+ */
+function formatAirQualitySourceName(providerName, scale) {
+    if (!providerName) return "";
+    const baseScale = scale?.split(".")?.[0];
+    const standardNames = {
+        HJ6332012: "国标 HJ 633—2012",
+        HJ6332025_DRAFT: "国标 HJ 633 2025 征求意见稿",
+        EPA_NowCast: "美标 EPA NowCast",
+        EU_EAQI: "欧盟 EAQI",
+        WAQI_InstantCast_US: "WAQI InstantCast 美标",
+        WAQI_InstantCast_CN: "WAQI InstantCast 国标",
+        WAQI_InstantCast_CN_25_DRAFT: "WAQI InstantCast 国标 2025 征求意见稿",
+        HK_AQHI: "香港 AQHI",
+        CA_AQHI: "加拿大 AQHI",
+        CN_DEATH_AQHI: "中国 CDC 死亡风险 AQHI",
+        CN_DEATH_HK_AQHI: "中国 CDC 死亡风险 + 香港 AQHI",
+        AQHI_Multi_CN: "AQHI-Multi 国标",
+        AQHI_Multi_CN_HK: "AQHI-Multi 国标+香港",
+        UBA: "德国 UBA",
+    };
+    const standard = standardNames[baseScale] ?? baseScale;
+    return standard ? `${providerName}（${standard}）` : providerName;
+}
+
 /**
  * 注入并合并空气质量数据（污染物、指数、昨日对比）
  * @param {any} airQuality - WeatherKit 原始空气质量对象
@@ -661,17 +692,17 @@ async function InjectAirQuality(airQuality, Settings, Caches, enviroments) {
     const currentIndexProvider = needInjectIndex ? Settings?.AirQuality?.Current?.Index?.Provider : "WeatherKit";
     const injectedComparison = needInjectComparison ? await InjectComparison(injectedIndex, currentIndexProvider, Settings, Caches, enviroments) : { ...injectedIndex, previousDayComparison: weatherKitComparison };
 
-    // Step5. 收集各阶段元数据，拼接最终 providerName 展示文案
+    // Step5. 生成单行来源文案：只显示空气质量指数的数据源名与标准，不再换行堆叠
     const weatherKitMetadata = airQuality?.metadata;
     const pollutantMetadata = injectedPollutants?.metadata;
     const indexMetadata = injectedIndex?.metadata;
     const comparisonMetadata = injectedComparison?.metadata;
-    const providers = [
-        ...(weatherKitMetadata?.providerName && !weatherKitMetadata.temporarilyUnavailable ? [weatherKitMetadata.providerName] : []),
-        ...(needPollutants && pollutantMetadata?.providerName && !pollutantMetadata.temporarilyUnavailable ? [`污染物：${pollutantMetadata.providerName}`] : []),
-        ...(needInjectIndex && indexMetadata?.providerName && !indexMetadata.temporarilyUnavailable ? [`指数：${AirQuality.appendScaleToProviderName(injectedIndex, Settings)}`] : []),
-        ...(needInjectComparison && comparisonMetadata?.providerName && !comparisonMetadata.temporarilyUnavailable ? [`对比昨日：\n${comparisonMetadata.providerName}`] : []),
-    ];
+    const sourceProviderName =
+        (needInjectIndex && indexMetadata?.providerName && !indexMetadata.temporarilyUnavailable ? indexMetadata.providerName : undefined)
+        ?? (needPollutants && pollutantMetadata?.providerName && !pollutantMetadata.temporarilyUnavailable ? pollutantMetadata.providerName : undefined)
+        ?? (weatherKitMetadata?.providerName && !weatherKitMetadata.temporarilyUnavailable ? weatherKitMetadata.providerName : undefined);
+    const sourceScale = needInjectIndex ? injectedIndex?.scale : airQuality?.scale;
+    const providerName = sourceProviderName ? formatAirQualitySourceName(sourceProviderName, sourceScale) : "";
 
     // Step6. 选取首个有效 provider，生成统一 logo
     const providerLogo = providerNameToLogo(weatherKitMetadata?.providerName || pollutantMetadata?.providerName || indexMetadata?.providerName || comparisonMetadata?.providerName);
@@ -682,7 +713,7 @@ async function InjectAirQuality(airQuality, Settings, Caches, enviroments) {
         ...(injectedIndex?.metadata && !injectedIndex.metadata.temporarilyUnavailable ? injectedIndex : {}),
         metadata: {
             ...(airQuality?.metadata ? airQuality.metadata : injectedPollutants?.metadata),
-            providerName: providers.join("\n"),
+            providerName,
             ...(providerLogo ? { providerLogo } : {}),
         },
         pollutants: AirQuality.ConvertPollutants(airQuality, injectedPollutants, needInjectIndex, injectedIndex, Settings) ?? [],

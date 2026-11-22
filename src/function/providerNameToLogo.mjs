@@ -21,24 +21,12 @@ export default function providerNameToLogo(providerName, version = "v2") {
     switch (normalizedProviderName) {
         case "WAQI":
         case "World Air Quality Index Project":
-            switch (version) {
-                case "v1":
-                    providerLogo = "https://waqi.info/images/logo.png";
-                    break;
-                case "v2":
-                    providerLogo = `https://raw.githubusercontent.com/NSRingo/WeatherKit/main/images/icon/${version}/WAQI.png`;
-                    break;
-            }
-            break;
         case "ColofulClouds":
         case "彩云天气":
-            // images/icon/ 只有 v1/v2，v3 及以上版本无此文件（实测 404）；此时返回空，保留苹果原生 providerLogo 或留空。
-            if (version === "v1" || version === "v2") providerLogo = `https://raw.githubusercontent.com/NSRingo/WeatherKit/main/images/icon/${version}/ColorfulClouds.png`;
-            break;
         case "气象在线":
         case "WeatherOL":
-            // 同上：v3 及以上版本无此文件（实测 404），返回空。
-            if (version === "v1" || version === "v2") providerLogo = `https://raw.githubusercontent.com/NSRingo/WeatherKit/main/images/icon/${version}/WeatherOL.png`;
+            // 不再输出任何自定义图标链接（包括 v1/v2 的 GitHub-raw 图标与 waqi.info 图标），一律返回空；
+            // 原厂已有 providerLogo 的透传原厂，其余留空。
             break;
         case "QWeather":
         case "和风天气":
