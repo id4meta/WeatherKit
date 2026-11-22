@@ -1,6 +1,7 @@
 import { FlatBufferRootProcessor } from "@nsnanocat/flatbuffer-root";
-import * as WK2 from "@nsringo/weatherkit";
+import { WK2 } from "@nsringo/weatherkit";
 import database from "../function/database.mjs";
+import { createUuidOffset, decodeUuid } from "../function/uuid.mjs";
 
 /**
  * 使用 Weather 根模型和产品 codec 配置通用根表处理器。
@@ -26,6 +27,12 @@ const WeatherKit2 = new FlatBufferRootProcessor({
 
 export default WeatherKit2;
 
+/**
+ * 编码 air quality 产品表。 / Encode the air quality product table.
+ * @param {import("flatbuffers").Builder} builder - FlatBuffer 构建器 / FlatBuffer builder.
+ * @param {object} data - 业务对象 / Payload.
+ * @returns {number} 产品表偏移 / Table offset.
+ */
 function encodeAirQuality(builder, data) {
     const metadataOffset = encodeMetadata(builder, data.metadata);
     const pollutantsOffset = WK2.AirQuality.createPollutantsVector(
@@ -36,6 +43,12 @@ function encodeAirQuality(builder, data) {
     return WK2.AirQuality.createAirQuality(builder, metadataOffset, data.categoryIndex, data.index, data.isSignificant, pollutantsOffset, WK2.ComparisonTrend[data.previousDayComparison], WK2.PollutantType[data.primaryPollutant], scaleOffset);
 }
 
+/**
+ * 编码 current weather 产品表。 / Encode the current weather product table.
+ * @param {import("flatbuffers").Builder} builder - FlatBuffer 构建器 / FlatBuffer builder.
+ * @param {object} data - 业务对象 / Payload.
+ * @returns {number} 产品表偏移 / Table offset.
+ */
 function encodeCurrentWeather(builder, data) {
     const metadataOffset = encodeMetadata(builder, data.metadata);
     const precipitationAmountNext1hByTypeOffset = WK2.CurrentWeatherData.createPrecipitationAmountNext1hByTypeVector(
@@ -107,6 +120,12 @@ function encodeCurrentWeather(builder, data) {
     );
 }
 
+/**
+ * 编码 daily forecast 产品表。 / Encode the daily forecast product table.
+ * @param {import("flatbuffers").Builder} builder - FlatBuffer 构建器 / FlatBuffer builder.
+ * @param {object} data - 业务对象 / Payload.
+ * @returns {number} 产品表偏移 / Table offset.
+ */
 function encodeForecastDaily(builder, data) {
     const metadataOffset = encodeMetadata(builder, data.metadata);
     const daysOffsets = data.days.map(day => {
@@ -275,6 +294,12 @@ function encodeForecastDaily(builder, data) {
     return WK2.DailyForecastData.createDailyForecastData(builder, metadataOffset, daysOffset);
 }
 
+/**
+ * 编码 hourly forecast 产品表。 / Encode the hourly forecast product table.
+ * @param {import("flatbuffers").Builder} builder - FlatBuffer 构建器 / FlatBuffer builder.
+ * @param {object} data - 业务对象 / Payload.
+ * @returns {number} 产品表偏移 / Table offset.
+ */
 function encodeForecastHourly(builder, data) {
     const metadataOffset = encodeMetadata(builder, data.metadata);
     const hoursOffsets = data.hours.map(hour =>
@@ -312,6 +337,12 @@ function encodeForecastHourly(builder, data) {
     return WK2.HourlyForecastData.createHourlyForecastData(builder, metadataOffset, hoursOffset);
 }
 
+/**
+ * 编码 next-hour precipitation 产品表。 / Encode the next-hour precipitation product table.
+ * @param {import("flatbuffers").Builder} builder - FlatBuffer 构建器 / FlatBuffer builder.
+ * @param {object} data - 业务对象 / Payload.
+ * @returns {number} 产品表偏移 / Table offset.
+ */
 function encodeForecastNextHour(builder, data) {
     const metadataOffset = encodeMetadata(builder, data.metadata);
     // 防御第三方数据：未知枚举传给 FlatBuffer 会静默编码为 CLEAR。
@@ -326,11 +357,17 @@ function encodeForecastNextHour(builder, data) {
     const conditionOffset = WK2.NextHourForecastData.createConditionVector(builder, conditionOffsets);
     const summaryOffsets = data.summary.map(summary => WK2.ForecastPeriodSummary.createForecastPeriodSummary(builder, summary.startTime, summary.endTime, WK2.PrecipitationType[summary.condition], summary.precipitationChance, summary.precipitationIntensity));
     const summaryOffset = WK2.NextHourForecastData.createSummaryVector(builder, summaryOffsets);
-    const minutesOffsets = data.minutes.map(minute => WK2.ForecastMinute.createForecastMinute(builder, minute.startTime, minute.precipitationChance, minute.precipitationIntensity, minute.perceivedPrecipitationIntensity));
+    const minutesOffsets = data.minutes.map(minute => WK2.Common.ForecastMinute.createForecastMinute(builder, minute.startTime, minute.precipitationChance, minute.precipitationIntensity, minute.perceivedPrecipitationIntensity));
     const minutesOffset = WK2.NextHourForecastData.createMinutesVector(builder, minutesOffsets);
     return WK2.NextHourForecastData.createNextHourForecastData(builder, metadataOffset, conditionOffset, summaryOffset, data.forecastStart, data.forecastEnd, minutesOffset);
 }
 
+/**
+ * 编码 news 产品表。 / Encode the news product table.
+ * @param {import("flatbuffers").Builder} builder - FlatBuffer 构建器 / FlatBuffer builder.
+ * @param {object} data - 业务对象 / Payload.
+ * @returns {number} 产品表偏移 / Table offset.
+ */
 function encodeNews(builder, data) {
     const metadataOffset = encodeMetadata(builder, data.metadata);
     const placementsOffsets = data.placements.map(placement => {
@@ -357,6 +394,12 @@ function encodeNews(builder, data) {
     return WK2.News.createNews(builder, metadataOffset, placementsOffset);
 }
 
+/**
+ * 编码 weather alerts 产品表。 / Encode the weather alerts product table.
+ * @param {import("flatbuffers").Builder} builder - FlatBuffer 构建器 / FlatBuffer builder.
+ * @param {object} data - 业务对象 / Payload.
+ * @returns {number} 产品表偏移 / Table offset.
+ */
 function encodeWeatherAlerts(builder, data) {
     const metadataOffset = encodeMetadata(builder, data.metadata);
     const alertsOffsets = data.alerts.map(alert => {
@@ -408,6 +451,12 @@ function encodeWeatherAlerts(builder, data) {
     return WK2.WeatherAlertCollectionData.createWeatherAlertCollectionData(builder, metadataOffset, detailsUrlOffset, alertsOffset);
 }
 
+/**
+ * 编码 weather changes 产品表。 / Encode the weather changes product table.
+ * @param {import("flatbuffers").Builder} builder - FlatBuffer 构建器 / FlatBuffer builder.
+ * @param {object} data - 业务对象 / Payload.
+ * @returns {number} 产品表偏移 / Table offset.
+ */
 function encodeWeatherChanges(builder, data) {
     const metadataOffset = encodeMetadata(builder, data.metadata);
     const changesOffsets = data.changes.map(change => WK2.Change.createChange(builder, change.forecastStart, change.forecastEnd, WK2.Direction[change.maxTemperatureChange], WK2.Direction[change.minTemperatureChange], WK2.Direction[change.dayPrecipitationChange], WK2.Direction[change.nightPrecipitationChange]));
@@ -415,6 +464,12 @@ function encodeWeatherChanges(builder, data) {
     return WK2.WeatherChanges.createWeatherChanges(builder, metadataOffset, data.forecastStart, data.forecastEnd, changesOffset);
 }
 
+/**
+ * 编码 historical comparisons 产品表。 / Encode the historical comparisons product table.
+ * @param {import("flatbuffers").Builder} builder - FlatBuffer 构建器 / FlatBuffer builder.
+ * @param {object} data - 业务对象 / Payload.
+ * @returns {number} 产品表偏移 / Table offset.
+ */
 function encodeHistoricalComparisons(builder, data) {
     const metadataOffset = encodeMetadata(builder, data.metadata);
     const comparisonsOffsets = data.comparisons.map(comparison => WK2.Comparison.createComparison(builder, WK2.ComparisonType[comparison.condition], comparison.currentValue, comparison.baselineValue, WK2.Deviation[comparison.deviation], comparison.baselineType, comparison.baselineStartDate));
@@ -422,11 +477,22 @@ function encodeHistoricalComparisons(builder, data) {
     return WK2.HistoricalComparison.createHistoricalComparison(builder, metadataOffset, comparisonsOffset);
 }
 
+/**
+ * 编码 location info 产品表。 / Encode the location info product table.
+ * @param {import("flatbuffers").Builder} builder - FlatBuffer 构建器 / FlatBuffer builder.
+ * @param {object} data - 业务对象 / Payload.
+ * @returns {number} 产品表偏移 / Table offset.
+ */
 function encodeLocationInfo(builder, data) {
     const metadataOffset = encodeMetadata(builder, data.metadata);
     return WK2.LocationInfo.createLocationInfo(builder, metadataOffset, builder.createString(data.preciseName), builder.createString(data.countryCode), builder.createString(data.timeZone), builder.createString(data.primaryName));
 }
 
+/**
+ * 解码 air quality 产品表。 / Decode the air quality product table.
+ * @param {object} data - 生成的表实例 / Generated table instance.
+ * @returns {object} 业务对象 / Payload.
+ */
 function decodeAirQuality(data) {
     const AirQualityData = data;
     data = {
@@ -448,6 +514,11 @@ function decodeAirQuality(data) {
     return data;
 }
 
+/**
+ * 解码 current weather 产品表。 / Decode the current weather product table.
+ * @param {object} data - 生成的表实例 / Generated table instance.
+ * @returns {object} 业务对象 / Payload.
+ */
 function decodeCurrentWeather(data) {
     const CurrentWeatherData = data;
     data = {
@@ -543,6 +614,11 @@ function decodeCurrentWeather(data) {
     return data;
 }
 
+/**
+ * 解码 daily forecast 产品表。 / Decode the daily forecast product table.
+ * @param {object} data - 生成的表实例 / Generated table instance.
+ * @returns {object} 业务对象 / Payload.
+ */
 function decodeForecastDaily(data) {
     const DailyForecastData = data;
     data = {
@@ -724,6 +800,11 @@ function decodeForecastDaily(data) {
     return data;
 }
 
+/**
+ * 解码 hourly forecast 产品表。 / Decode the hourly forecast product table.
+ * @param {object} data - 生成的表实例 / Generated table instance.
+ * @returns {object} 业务对象 / Payload.
+ */
 function decodeForecastHourly(data) {
     const HourlyForecastData = data;
     data = {
@@ -762,6 +843,11 @@ function decodeForecastHourly(data) {
     return data;
 }
 
+/**
+ * 解码 next-hour precipitation 产品表。 / Decode the next-hour precipitation product table.
+ * @param {object} data - 生成的表实例 / Generated table instance.
+ * @returns {object} 业务对象 / Payload.
+ */
 function decodeForecastNextHour(data) {
     const NextHourForecastData = data;
     data = {
@@ -806,6 +892,11 @@ function decodeForecastNextHour(data) {
     return data;
 }
 
+/**
+ * 解码 news 产品表。 / Decode the news product table.
+ * @param {object} data - 生成的表实例 / Generated table instance.
+ * @returns {object} 业务对象 / Payload.
+ */
 function decodeNews(data) {
     const NewsData = data;
     data = {
@@ -837,6 +928,11 @@ function decodeNews(data) {
     return data;
 }
 
+/**
+ * 解码 weather alerts 产品表。 / Decode the weather alerts product table.
+ * @param {object} data - 生成的表实例 / Generated table instance.
+ * @returns {object} 业务对象 / Payload.
+ */
 function decodeWeatherAlerts(data) {
     const WeatherAlertCollectionData = data;
     data = {
@@ -881,6 +977,11 @@ function decodeWeatherAlerts(data) {
     return data;
 }
 
+/**
+ * 解码 weather changes 产品表。 / Decode the weather changes product table.
+ * @param {object} data - 生成的表实例 / Generated table instance.
+ * @returns {object} 业务对象 / Payload.
+ */
 function decodeWeatherChanges(data) {
     const WeatherChangesData = data;
     data = {
@@ -903,6 +1004,11 @@ function decodeWeatherChanges(data) {
     return data;
 }
 
+/**
+ * 解码 historical comparisons 产品表。 / Decode the historical comparisons product table.
+ * @param {object} data - 生成的表实例 / Generated table instance.
+ * @returns {object} 业务对象 / Payload.
+ */
 function decodeHistoricalComparisons(data) {
     const HistoricalComparisonsData = data;
     data = {
@@ -923,6 +1029,11 @@ function decodeHistoricalComparisons(data) {
     return data;
 }
 
+/**
+ * 解码 location info 产品表。 / Decode the location info product table.
+ * @param {object} data - 生成的表实例 / Generated table instance.
+ * @returns {object} 业务对象 / Payload.
+ */
 function decodeLocationInfo(data) {
     const LocationInfoData = data;
     data = {
@@ -935,6 +1046,12 @@ function decodeLocationInfo(data) {
     return data;
 }
 
+/**
+ * 编码产品元数据子表；缺失时返回 0（不写入）。 / Encode the metadata child table; returns 0 when absent.
+ * @param {import("flatbuffers").Builder} builder - FlatBuffer 构建器 / FlatBuffer builder.
+ * @param {object} [metadata] - 元数据对象 / Metadata payload.
+ * @returns {number} 子表偏移 / Table offset.
+ */
 function encodeMetadata(builder, metadata) {
     if (!metadata) return 0;
     return WK2.Metadata.createMetadata(
@@ -958,6 +1075,11 @@ function encodeMetadata(builder, metadata) {
     );
 }
 
+/**
+ * 解码产品元数据子表；缺失时返回 undefined。 / Decode the metadata child table; returns undefined when absent.
+ * @param {object} [data] - 生成的元数据表实例 / Generated metadata table instance.
+ * @returns {object|undefined} 元数据对象 / Metadata payload.
+ */
 function decodeMetadata(data) {
     if (!data) return undefined;
     data = {
@@ -974,47 +1096,4 @@ function decodeMetadata(data) {
         sourceType: WK2.SourceType[data.sourceType()],
     };
     return data;
-}
-
-function toUuidBytes(uuid) {
-    if (uuid === null || uuid === undefined) return null;
-    if (uuid instanceof Uint8Array || Array.isArray(uuid)) return uuid;
-    if (typeof uuid === "string") {
-        const bytesObject = uuidStringToBytesObject(uuid);
-        return bytesObject ? bytesObject.bytes : null;
-    }
-    if (typeof uuid === "object") {
-        if (uuid.bytes instanceof Uint8Array || Array.isArray(uuid.bytes)) return uuid.bytes;
-        if (typeof uuid.bytesArray === "function") return uuid.bytesArray();
-    }
-    return null;
-}
-
-function uuidStringToBytesObject(uuidString) {
-    if (typeof uuidString !== "string") return null;
-    const hex = uuidString.replace(/-/g, "").toLowerCase();
-    if (!/^[0-9a-f]{32}$/.test(hex)) return null;
-    const bytes = [];
-    for (let index = 0; index < hex.length; index += 2) bytes.push(Number.parseInt(hex.slice(index, index + 2), 16));
-    return { bytes };
-}
-
-function uuidBytesObjectToString(uuid) {
-    const bytes = toUuidBytes(uuid);
-    if (!bytes || bytes.length !== 16) return null;
-    const hex = Array.from(bytes)
-        .map(byte => byte.toString(16).padStart(2, "0"))
-        .join("");
-    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
-}
-
-function createUuidOffset(builder, uuid) {
-    const bytes = toUuidBytes(uuid);
-    if (!bytes || bytes.length === 0) return 0;
-    const idBytesOffset = WK2.UUID.createBytesVector(builder, bytes);
-    return WK2.UUID.createUUID(builder, idBytesOffset);
-}
-
-function decodeUuid(uuid) {
-    return uuidBytesObjectToString(uuid);
 }
