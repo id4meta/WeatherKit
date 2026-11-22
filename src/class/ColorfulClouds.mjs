@@ -277,7 +277,7 @@ export default class ColorfulClouds {
                         case "ok": {
                             const timeStamp = (Date.now() / 1000) | 0;
                             const metadata = {
-                                attributionUrl: "https://www.caiyunapp.com/h5",
+                                attributionUrl: "https://developer.apple.com/weatherkit/data-source-attribution/",
                                 expireTime: timeStamp + ForecastNextHour.ExpirationInterval,
                                 language: "zh-CN", // `${this.language}-${this.country}`, // body?.lang,
                                 latitude: body?.location?.[0],
@@ -349,7 +349,7 @@ export default class ColorfulClouds {
         Console.info("☑️ WeatherAlert");
         const failedWeatherAlerts = {
             metadata: {
-                attributionUrl: "https://www.caiyunapp.com/h5",
+                attributionUrl: "https://developer.apple.com/weatherkit/data-source-attribution/",
             },
             detailsUrl: `https://weatherkit.apple.com/alertDetails/index.html?ids=${this.latitude},${this.longitude}&lang=${encodeURIComponent(this.weatherKitLanguage)}&party=ColorfulClouds`,
             alerts: [],
@@ -378,7 +378,7 @@ export default class ColorfulClouds {
         Console.info("☑️ WeatherAlertV3CAP");
         const failedWeatherAlerts = {
             metadata: {
-                attributionUrl: "https://www.caiyunapp.com/h5",
+                attributionUrl: "https://developer.apple.com/weatherkit/data-source-attribution/",
             },
             detailsUrl: `https://weatherkit.apple.com/alertDetails/index.html?ids=${this.latitude},${this.longitude}&lang=${encodeURIComponent(this.weatherKitLanguage)}&party=ColorfulClouds`,
             alerts: [],
@@ -463,7 +463,7 @@ export default class ColorfulClouds {
                         case "ok": {
                             const timeStamp = (Date.now() / 1000) | 0;
                             const metadata = {
-                                attributionUrl: "https://www.caiyunapp.com/h5",
+                                attributionUrl: "https://developer.apple.com/weatherkit/data-source-attribution/",
                                 expireTime: timeStamp + 60 * 60,
                                 language: "zh-CN", // `${this.language}-${this.country}`,
                                 latitude: body?.location?.[0],
@@ -596,7 +596,7 @@ export default class ColorfulClouds {
             reportedTime: reportedTime ?? timeStamp,
             latitude,
             expireTime: timeStamp + 60 * 60,
-            attributionUrl: "https://www.caiyunapp.com/h5",
+            attributionUrl: "https://developer.apple.com/weatherkit/data-source-attribution/",
             providerLogo: providerNameToLogo("彩云天气", this.version),
             temporarilyUnavailable,
             readTime: timeStamp,
