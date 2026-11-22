@@ -1,4 +1,4 @@
-const ALLOWED_PATH_PREFIXES = ["/api/v1/", "/api/v2/", "/weatherkit.apple.com/api/"];
+const ALLOWED_PATH_PREFIXES = ["/api/v1/", "/api/v2/", "/api/v3/", "/weatherkit.apple.com/api/"];
 const APPLE_UA_PATTERN = /(Weather|weatherd|CFNetwork|Darwin)/i;
 
 export async function onRequest(context) {
