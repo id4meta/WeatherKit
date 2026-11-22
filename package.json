@@ -49,7 +49,6 @@
         "build:args:rewrite": "arguments-builder build --config arguments-builder.rewrite.config.ts",
         "build:args": "npm-run-all --serial build:release-args build:full-args",
         "dts": "arguments-builder dts -c arguments-builder.full.config.ts",
-        "submodule": "git submodule update --remote",
         "update": "npm update --save"
     },
     "browserslist": [
@@ -67,9 +66,9 @@
         "typescript": "^5.9.3"
     },
     "dependencies": {
-        "@nsnanocat/util": "^2.7.4",
-        "@nsnanocat/flatbuffer-root": "^1.0.0",
-        "@nsringo/weatherkit": "^1.1.2",
+        "@nsnanocat/flatbuffer-root": "^1.1.0",
+        "@nsnanocat/util": "^2.7.5",
+        "@nsringo/weatherkit": "^2.1.0",
         "fetch-cookie": "^3.2.0",
         "flatbuffers": "^24.12.23",
         "hono": "^4.12.31",
