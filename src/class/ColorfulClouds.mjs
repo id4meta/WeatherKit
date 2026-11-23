@@ -355,13 +355,8 @@ export default class ColorfulClouds {
                             // 彩云 v2.6 minutely.probability 实测同时存在 0–1 小数（如 0.99）与 0–100 整数（如 10）两种口径：
                             // 数组内若存在 > 1 的值则按 0–100 百分比直取，否则按 0–1 小数乘 100，并统一钳制在 [0, 100] 防 FlatBuffer uint8 溢出。
                             const rawProbability = Array.isArray(body?.result?.minutely?.probability) ? body.result.minutely.probability : [];
-                            const isPercentScale = rawProbability.some(probability => Number(probability) > 1);
-                            body.result.minutely.probability = rawProbability.map(probability => {
-                                const value = Number(probability);
-                                if (!Number.isFinite(value) || value <= 0) return 0;
-                                const normalized = isPercentScale ? value : value * 100;
-                                return Math.min(100, Math.max(0, Math.round(normalized)));
-                            });
+                            const isPercentScale = this.#IsPercentProbabilityScale(rawProbability);
+                            body.result.minutely.probability = rawProbability.map(probability => this.#NormalizeProbability(probability, isPercentScale));
                             const minuteStemp = Math.floor((body?.server_time ?? timeStamp) / 60) * 60;
                             forecastNextHour = {
                                 metadata: metadata,
@@ -557,6 +552,9 @@ export default class ColorfulClouds {
                                 metadata: metadata,
                                 days: [],
                             };
+                            const isDayProbPercent = this.#IsPercentProbabilityScale((body?.result?.daily?.precipitation ?? []).map(item => item?.probability));
+                            const isDaytimeProbPercent = this.#IsPercentProbabilityScale((body?.result?.daily?.precipitation_08h_20h ?? []).map(item => item?.probability));
+                            const isOvernightProbPercent = this.#IsPercentProbabilityScale((body?.result?.daily?.precipitation_20h_32h ?? []).map(item => item?.probability));
                             for (let i = 0; i < dailysteps; i++) {
                                 const timeStamp = (new Date(body?.result?.daily?.skycon?.[i]?.date).getTime() / 1000) | 0;
                                 forecastDaily.days.push({
@@ -572,7 +570,7 @@ export default class ColorfulClouds {
                                     // Caiyun `avg` is an average rate (mm/h), not WeatherKit's accumulated amount (mm).
                                     // Leave both amount fields absent so the merge keeps Apple's paired scalar/by-type totals.
                                     // precipitationAmountByType: [], // Not given
-                                    precipitationChance: this.#RoundUInt(body?.result?.daily?.precipitation?.[i]?.probability, 0, 100),
+                                    precipitationChance: this.#NormalizeProbability(body?.result?.daily?.precipitation?.[i]?.probability, isDayProbPercent),
                                     // precipitationType: "", // Not given
                                     // snowfallAmount: 0, // Not given
                                     // solarMidnight: 0, // Not given
@@ -606,7 +604,7 @@ export default class ColorfulClouds {
                                         // humidityMin: Math.round(body?.result?.daily?.humidity?.[i]?.min * 100), // Not given
                                         // Caiyun `avg` is mm/h and cannot replace WeatherKit's accumulated precipitation total.
                                         // precipitationAmountByType: [], // Not given
-                                        precipitationChance: this.#RoundUInt(body?.result?.daily?.precipitation_08h_20h?.[i]?.probability, 0, 100),
+                                        precipitationChance: this.#NormalizeProbability(body?.result?.daily?.precipitation_08h_20h?.[i]?.probability, isDaytimeProbPercent),
                                         // precipitationType: "", // Not given
                                         // snowfallAmount: 0, // Not given
                                         temperatureMax: body?.result?.daily?.temperature_08h_20h?.[i]?.max,
@@ -630,7 +628,7 @@ export default class ColorfulClouds {
                                         // humidityMin: Math.round(body?.result?.daily?.humidity?.[i]?.min * 100), // Not given
                                         // Caiyun `avg` is mm/h and cannot replace WeatherKit's accumulated precipitation total.
                                         // precipitationAmountByType: [], // Not given
-                                        precipitationChance: this.#RoundUInt(body?.result?.daily?.precipitation_20h_32h?.[i]?.probability, 0, 100),
+                                        precipitationChance: this.#NormalizeProbability(body?.result?.daily?.precipitation_20h_32h?.[i]?.probability, isOvernightProbPercent),
                                         // precipitationType: "", // Not given
                                         // snowfallAmount: 0, // Not given
                                         temperatureMax: body?.result?.daily?.temperature_20h_32h?.[i]?.max,
@@ -663,6 +661,22 @@ export default class ColorfulClouds {
             Console.info("✅ Daily");
         }
         return forecastDaily;
+    }
+
+    #IsPercentProbabilityScale(values = []) {
+        return Array.isArray(values) && values.some(value => {
+            if (value === null || value === undefined || value === "") return false;
+            const num = Number(value);
+            return Number.isFinite(num) && num > 1;
+        });
+    }
+
+    #NormalizeProbability(value, isPercentScale = false) {
+        if (value === null || value === undefined || value === "") return undefined;
+        const num = Number(value);
+        if (!Number.isFinite(num)) return undefined;
+        const scaled = isPercentScale ? num : num * 100;
+        return Math.max(0, Math.min(100, Math.round(scaled)));
     }
 
     #RoundUInt(value, min = 0, max = 65535) {
@@ -921,6 +935,7 @@ export default class ColorfulClouds {
             };
         }
 
+        const isHourlyProbPercent = this.#IsPercentProbabilityScale(hourly.result.hourly.precipitation.map(item => item?.probability));
         Console.info("✅ ForecastHourly");
         return {
             metadata: this.#Metadata(hourly.result.server_time, hourly.location),
@@ -935,7 +950,7 @@ export default class ColorfulClouds {
                 humidity: Math.round(hourly.result.hourly.humidity[i].value * 100),
                 // perceivedPrecipitationIntensity: "", // Not given
                 precipitationAmount: hourly.result.hourly.precipitation[i].value,
-                precipitationChance: this.#RoundUInt(hourly.result.hourly.precipitation[i].probability, 0, 100),
+                precipitationChance: this.#NormalizeProbability(hourly.result.hourly.precipitation[i]?.probability, isHourlyProbPercent),
                 // precipitationIntensity: 0, // Not given
                 // precipitationType: "", // Not given
                 pressure: hourly.result.hourly.pressure[i].value / 100,
