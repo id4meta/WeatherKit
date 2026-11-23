@@ -10,11 +10,11 @@ export default class ForecastNextHour {
     // NextHour metadata (confirmed on-device 2026-11-23: with a 60-minute
     // expiry the card still hid after 15 minutes, and the long expiry
     // blocked weatherd from issuing a standalone
-    // ?dataSets=forecastNextHour refresh before the cutoff). Use 14
-    // minutes to take the full window while leaving a 1-minute buffer
-    // for the refresh. Minutely() additionally caps at forecastEnd so
-    // the claimed validity never outruns the minute data itself.
-    static ExpirationInterval = 14 * 60;
+    // ?dataSets=forecastNextHour refresh before the cutoff). Use 13m40s
+    // (820s) to take nearly the full window while leaving an 80-second
+    // buffer for the refresh. Minutely() additionally caps at forecastEnd
+    // so the claimed validity never outruns the minute data itself.
+    static ExpirationInterval = 13 * 60 + 40;
 
     static #Configs = {
         Pollutants: {
