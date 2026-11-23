@@ -44,6 +44,8 @@
  * Hono Worker 运行时适配器。
  * Hono worker runtime adapter.
  */
+const REQUEST_HEADER_BLACKLIST = new Set(["connection", "content-length", "host", "x-forwarded-proto", "x-real-ip"]);
+
 export default class HonoWorkerAdapter {
     /**
      * 根据 worker 入口域名与回退路径重写目标路由 URL。
@@ -86,11 +88,10 @@ export default class HonoWorkerAdapter {
      * @returns {WorkerHeaders} 标准化后的请求头 / Normalized request headers.
      */
     static normalizeRequestHeaders(headers = {}) {
-        const requestHeaderBlacklist = new Set(["connection", "content-length", "host", "x-forwarded-proto", "x-real-ip"]);
         return Object.entries(headers).reduce((normalizedHeaders, [key, value]) => {
             if (value === undefined) return normalizedHeaders;
             const normalizedKey = key.toLowerCase();
-            if (normalizedKey.startsWith("cf-") || requestHeaderBlacklist.has(normalizedKey)) return normalizedHeaders;
+            if (normalizedKey.startsWith("cf-") || REQUEST_HEADER_BLACKLIST.has(normalizedKey)) return normalizedHeaders;
             normalizedHeaders[key] = value;
             return normalizedHeaders;
         }, {});
@@ -104,7 +105,6 @@ export default class HonoWorkerAdapter {
      */
     static async buildRequest(req) {
         const url = HonoWorkerAdapter.routeRewrite(new URL(req.url), req.param("rest"));
-        console.log(url.toString());
         const method = req.method;
         let bodyBytes;
         switch (method) {

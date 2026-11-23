@@ -288,3 +288,29 @@ function parameterCount(token) {
     if (token === "START" || token === "STOP") return 1;
     return 0;
 }
+
+test("Summary keeps the final minute switch as its own segment in v3", () => {
+    const minutes = Array.from({ length: 71 }, (_, index) => {
+        const raining = index < 14 || (index >= 39 && index < 70);
+        return {
+            summaryCondition: raining ? "RAIN" : "CLEAR",
+            condition: raining ? "RAIN" : "CLEAR",
+            clear: !raining,
+            startTime: BASE_TIME + index * 60,
+            precipitationChance: raining ? 100 : 0,
+            precipitationIntensity: raining ? 1 : 0,
+        };
+    });
+
+    const summaries = ForecastNextHour.Summary(minutes, "v3");
+    assert.equal(summaries.length, 4);
+    assert.deepEqual(
+        summaries.map(summary => summary.clear),
+        [false, true, false, true],
+    );
+    assert.equal("endTime" in summaries[3], false);
+
+    const conditions = ForecastNextHour.Condition(summaries, "v3");
+    assert.ok(conditions.length > 0);
+    assert.equal(conditions.length, 4);
+});

@@ -220,36 +220,40 @@ export default class WeatherAlerts {
 
     static #LogMergeAlertsStart(to, from) {
         if (!WeatherAlerts.#IsDebug()) return;
-        Console.debug(
-            "mergeAlerts",
-            `appleAlertCount: ${to.length}`,
-            `sourceAlertCount: ${from.length}`,
-            `appleAlerts: ${JSON.stringify(
-                to.map((alert, index) => WeatherAlerts.#WeatherAlertDebugSnapshot(alert, index)),
-                null,
-                2,
-            )}`,
-            `sourceAlerts: ${JSON.stringify(
-                from.map((alert, index) => WeatherAlerts.#WeatherAlertDebugSnapshot(alert, index)),
-                null,
-                2,
-            )}`,
-        );
+        if (Console.logLevel === "DEBUG" || Console.logLevel === "ALL") {
+            Console.debug(
+                "mergeAlerts",
+                `appleAlertCount: ${to.length}`,
+                `sourceAlertCount: ${from.length}`,
+                `appleAlerts: ${JSON.stringify(
+                    to.map((alert, index) => WeatherAlerts.#WeatherAlertDebugSnapshot(alert, index)),
+                    null,
+                    2,
+                )}`,
+                `sourceAlerts: ${JSON.stringify(
+                    from.map((alert, index) => WeatherAlerts.#WeatherAlertDebugSnapshot(alert, index)),
+                    null,
+                    2,
+                )}`,
+            );
+        }
     }
 
     static #LogMergeAlertMatch(appleAlert, sourceAlerts, usedSourceAlertIndexes, appleAlertIndex, sourceAlertIndex) {
         if (!WeatherAlerts.#IsDebug()) return;
         const candidates = WeatherAlerts.#SourceAlertCandidates(appleAlert, sourceAlerts, usedSourceAlertIndexes);
-        Console.debug(
-            "mergeAlerts",
-            `appleAlertIndex: ${appleAlertIndex}`,
-            `selectedSourceAlertIndex: ${sourceAlertIndex}`,
-            `selectedScore: ${candidates[0]?.score ?? 0}`,
-            `usedSameIndexFallback: ${sourceAlertIndex === appleAlertIndex && (candidates[0]?.score ?? 0) < 30}`,
-            `candidates: ${JSON.stringify(candidates, null, 2)}`,
-            `appleAlert: ${JSON.stringify(WeatherAlerts.#WeatherAlertDebugSnapshot(appleAlert, appleAlertIndex), null, 2)}`,
-            `sourceAlert: ${JSON.stringify(sourceAlertIndex >= 0 ? WeatherAlerts.#WeatherAlertDebugSnapshot(sourceAlerts[sourceAlertIndex], sourceAlertIndex) : undefined, null, 2)}`,
-        );
+        if (Console.logLevel === "DEBUG" || Console.logLevel === "ALL") {
+            Console.debug(
+                "mergeAlerts",
+                `appleAlertIndex: ${appleAlertIndex}`,
+                `selectedSourceAlertIndex: ${sourceAlertIndex}`,
+                `selectedScore: ${candidates[0]?.score ?? 0}`,
+                `usedSameIndexFallback: ${sourceAlertIndex === appleAlertIndex && (candidates[0]?.score ?? 0) < 30}`,
+                `candidates: ${JSON.stringify(candidates, null, 2)}`,
+                `appleAlert: ${JSON.stringify(WeatherAlerts.#WeatherAlertDebugSnapshot(appleAlert, appleAlertIndex), null, 2)}`,
+                `sourceAlert: ${JSON.stringify(sourceAlertIndex >= 0 ? WeatherAlerts.#WeatherAlertDebugSnapshot(sourceAlerts[sourceAlertIndex], sourceAlertIndex) : undefined, null, 2)}`,
+            );
+        }
     }
 
     static #LogMergeAlertSkip(appleAlertIndex) {
@@ -260,7 +264,7 @@ export default class WeatherAlerts {
     static #LogMergeAlertPatch(before, appleAlert, appleAlertIndex, sourceAlertIndex) {
         if (!WeatherAlerts.#IsDebug()) return;
         const after = WeatherAlerts.#WeatherAlertDebugSnapshot(appleAlert, appleAlertIndex);
-        Console.debug("mergeAlerts", `appleAlertIndex: ${appleAlertIndex}`, `sourceAlertIndex: ${sourceAlertIndex}`, `changed: ${JSON.stringify(WeatherAlerts.#WeatherAlertDebugChanges(before, after), null, 2)}`, `after: ${JSON.stringify(after, null, 2)}`);
+        if (Console.logLevel === "DEBUG" || Console.logLevel === "ALL") Console.debug("mergeAlerts", `appleAlertIndex: ${appleAlertIndex}`, `sourceAlertIndex: ${sourceAlertIndex}`, `changed: ${JSON.stringify(WeatherAlerts.#WeatherAlertDebugChanges(before, after), null, 2)}`, `after: ${JSON.stringify(after, null, 2)}`);
     }
 
     static #SourceAlertCandidates(appleAlert, sourceAlerts, usedSourceAlertIndexes) {

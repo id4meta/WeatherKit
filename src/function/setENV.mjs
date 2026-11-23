@@ -13,7 +13,7 @@ export default function setENV(name, platforms, database) {
     Console.info("☑️ Set Environment Variables");
     const { Settings, Caches, Configs } = getStorage(name, platforms, database);
     /***************** Settings *****************/
-    Console.info(`typeof Settings: ${typeof Settings}`, `Settings: ${JSON.stringify(Settings, null, 2)}`);
+    if (Console.logLevel === "INFO" || Console.logLevel === "DEBUG" || Console.logLevel === "ALL") Console.info(`typeof Settings: ${typeof Settings}`, `Settings: ${JSON.stringify(Settings, null, 2)}`);
     string2array("DataSets");
     string2array("Weather.Replace");
     string2array("AirQuality.Current.Index.Replace");

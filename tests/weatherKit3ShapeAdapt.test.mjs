@@ -4,7 +4,7 @@ import test from "node:test";
 globalThis.$environment = { "surge-version": "test" };
 globalThis.$persistentStore = { read: () => null, write: () => true };
 globalThis.$argument = { LogLevel: "OFF", Storage: "Argument" };
-const { adaptWK3ConditionCode, adaptWK3PrecipitationAmount, syncCurrentConditionWithNextHour } = await import("../src/process/Response.dev.mjs");
+const { adaptWK3ConditionCode, adaptWK3PrecipitationAmount, syncCurrentConditionWithNextHour, resolveCountryForResponse } = await import("../src/process/Response.dev.mjs");
 
 // WK3 二进制分支形状适配：注入的标量 conditionCode 必须包回单元素数组，
 // 否则 WeatherKit3.encode.compile 报 Invalid WK3 vector（真机诊断 WK3_DIAG 已定位）。
@@ -133,4 +133,18 @@ test("syncCurrentConditionWithNextHour does nothing when perceivedPrecipitationI
     assert.deepEqual(currentWeather.conditionCode, ["CLOUDY"]);
     assert.equal(currentWeather.precipitationIntensity, 0);
     assert.equal(currentWeather.perceivedPrecipitationIntensity, 0);
+});
+
+test("resolveCountryForResponse infers CN/HK from domestic coordinates when country query param is omitted", () => {
+    const yangzhou = new URL("https://weatherkit.apple.com/api/v3/weather/zh-Hans-US/32.390/119.499?timezone=Asia/Shanghai&dataSets=currentWeather");
+    assert.equal(resolveCountryForResponse(yangzhou, { country: "US", latitude: "32.390", longitude: "119.499" }), "CN");
+
+    const shenzhen = new URL("https://weatherkit.apple.com/api/v3/weather/zh-Hans-US/22.5431/114.0579?dataSets=currentWeather");
+    assert.equal(resolveCountryForResponse(shenzhen, { country: "US", latitude: "22.5431", longitude: "114.0579" }), "CN");
+
+    const sf = new URL("https://weatherkit.apple.com/api/v3/weather/en-US/37.774/-122.419?timezone=America/Los_Angeles");
+    assert.equal(resolveCountryForResponse(sf, { country: "US", latitude: "37.774", longitude: "-122.419" }), "US");
+
+    const explicit = new URL("https://weatherkit.apple.com/api/v3/weather/zh-Hans-US/32.390/119.499?country=US");
+    assert.equal(resolveCountryForResponse(explicit, { country: "US", latitude: "32.390", longitude: "119.499" }), "US");
 });

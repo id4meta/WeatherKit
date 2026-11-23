@@ -24,33 +24,42 @@ export default class Weather {
      * 将新的气象数组合并到原始气象数组
      * @param {array} to - 原始气象数组
      * @param {array} from - 新的气象数组
-     * @returns {array} 原始气象数组
+     * @param {{ mutate?: boolean }} [options] - mutate 为 true（默认）时原地合并并返回 to；为 false 时不修改 to 并返回合并后的新数组
+     * @returns {array} 合并后的气象数组
      */
-    static mergeForecast(to = [], from = []) {
-        let i = 0,
-            j = 0;
+    static mergeForecast(to = [], from = [], { mutate = true } = {}) {
+        const result = mutate ? to : new Array(to.length);
+        let i = 0;
+        let j = 0;
         while (i < to.length) {
-            const forecastStart = to[i].forecastStart;
+            const target = to[i];
+            const forecastStart = target.forecastStart;
             const newForecastStart = j < from.length ? from[j].forecastStart : Number.POSITIVE_INFINITY;
 
             if (forecastStart === newForecastStart) {
-                //Console.debug(`${i}: ${newForecastStart} -> ${forecastStart}`);
-                // 原地把 from[j] 的字段合入 to[i]（A 冲突字段保留 or 被覆盖，看你需要）
-                if (Object.hasOwn(from[j], "daytimeForecast")) from[j].daytimeForecast = { ...to[i].daytimeForecast, ...from[j].daytimeForecast };
-                if (Object.hasOwn(from[j], "overnightForecast")) from[j].overnightForecast = { ...to[i].overnightForecast, ...from[j].overnightForecast };
-                if (Object.hasOwn(from[j], "restOfDayForecast")) from[j].restOfDayForecast = { ...to[i].restOfDayForecast, ...from[j].restOfDayForecast };
-                Object.assign(to[i], from[j]); // 或者：Object.assign(to[i], {/* 自定义映射 */})
+                const source = from[j];
+                if (mutate) {
+                    if (Object.hasOwn(source, "daytimeForecast")) source.daytimeForecast = { ...target.daytimeForecast, ...source.daytimeForecast };
+                    if (Object.hasOwn(source, "overnightForecast")) source.overnightForecast = { ...target.overnightForecast, ...source.overnightForecast };
+                    if (Object.hasOwn(source, "restOfDayForecast")) source.restOfDayForecast = { ...target.restOfDayForecast, ...source.restOfDayForecast };
+                    Object.assign(target, source);
+                } else {
+                    const item = { ...target, ...source };
+                    if (Object.hasOwn(source, "daytimeForecast")) item.daytimeForecast = { ...target.daytimeForecast, ...source.daytimeForecast };
+                    if (Object.hasOwn(source, "overnightForecast")) item.overnightForecast = { ...target.overnightForecast, ...source.overnightForecast };
+                    if (Object.hasOwn(source, "restOfDayForecast")) item.restOfDayForecast = { ...target.restOfDayForecast, ...source.restOfDayForecast };
+                    result[i] = item;
+                }
                 i++;
                 j++;
             } else if (newForecastStart < forecastStart) {
-                //Console.debug(`${j}: ${newForecastStart} -> X`);
-                j++; // 让 from 追上 to
+                j++;
             } else {
-                //Console.debug(`${i}: X -> ${forecastStart}`);
-                i++; // to 无匹配，保留 to[i]
+                if (!mutate) result[i] = target;
+                i++;
             }
         }
-        return to; // 可选：返回同一个引用
+        return result;
     }
 
     static ConvertWeatherCode(skycon) {

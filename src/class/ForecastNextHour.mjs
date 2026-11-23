@@ -208,87 +208,51 @@ export default class ForecastNextHour {
     static Summary(minutes = [], version = "v2") {
         Console.info("☑️ Summary");
         const Summaries = [];
-        const Summary = {
-            condition: "CLEAR",
-            startTime: 0,
-            precipitationChance: 0,
-            precipitationIntensity: 0,
-            //beginCondition: "",
-            //endCondition: "",
-            maxCondition: "",
-            clear: true,
-        };
         const Length = Math.min(71, minutes.length);
-        for (let i = 0; i < Length; i++) {
+        if (Length === 0) {
+            Console.info("✅ Summary");
+            return Summaries;
+        }
+        const isDebug = Console.logLevel === "DEBUG" || Console.logLevel === "ALL";
+        const formatCondition = cond => (version === "v3" ? [cond] : cond);
+        let Summary = {
+            condition: formatCondition(minutes[0].summaryCondition),
+            startTime: minutes[0].startTime,
+            precipitationChance: minutes[0].precipitationChance,
+            precipitationIntensity: minutes[0].precipitationIntensity,
+            maxCondition: minutes[0].condition,
+            clear: minutes[0].clear,
+        };
+        for (let i = 1; i < Length; i++) {
             const minute = minutes[i];
             const previousMinute = minutes[i - 1];
-            switch (i) {
-                case 0: // 第一个
-                    Summary.startTime = minute.startTime;
-                    // condition 只关心降水类型，不关心具体强弱描述；形态按目标版本分流：v2 标量，v3 数组（枚举向量）
-                    switch (version) {
-                        case "v3":
-                            Summary.condition = [minute.summaryCondition];
-                            break;
-                        case "v2":
-                        default:
-                            Summary.condition = minute.summaryCondition;
-                            break;
-                    }
-                    Summary.precipitationChance = minute.precipitationChance;
-                    Summary.precipitationIntensity = minute.precipitationIntensity;
-                    //Summary.beginCondition = minute.condition;
-                    //Summary.endCondition = "";
-                    Summary.maxCondition = minute.condition;
-                    Summary.clear = minute.clear;
-                    break;
-                case Length - 1: // 最后一个
-                    if (version === "v3") {
-                        delete Summary.endTime;
-                    } else {
-                        Summary.endTime = 0; // ⚠️WK2 空值写零，WK3 开放式末段省略 endTime
-                    }
-                    //Summary.endCondition = minute.condition;
-                    Summary.clear = minute.clear;
-                    Console.debug(`Summaries[${i}]`, JSON.stringify({ ...minute, ...Summary }, null, 2));
-                    Summaries.push({ ...Summary });
-                    break;
-                default: // 中间
-                    if (minute.summaryCondition !== previousMinute.summaryCondition) {
-                        // 结束当前summary
-                        Summary.endTime = minute.startTime;
-                        //Summary.endCondition = previousMinute.condition;
-                        Console.debug(`Summaries[${i}]`, JSON.stringify({ ...previousMinute, ...Summary }, null, 2));
-                        Summaries.push({ ...Summary });
+            if (minute.summaryCondition !== previousMinute.summaryCondition) {
+                Summary.endTime = minute.startTime;
+                if (isDebug) Console.debug(`Summaries[${i}]`, JSON.stringify({ ...previousMinute, ...Summary }, null, 2));
+                Summaries.push({ ...Summary });
 
-                        // 开始新的summary
-                        Summary.startTime = minute.startTime;
-                        // condition 只关心降水类型，不关心具体强弱描述；形态按目标版本分流：v2 标量，v3 数组（枚举向量）
-                        switch (version) {
-                            case "v3":
-                                Summary.condition = [minute.summaryCondition];
-                                break;
-                            case "v2":
-                            default:
-                                Summary.condition = minute.summaryCondition;
-                                break;
-                        }
-                        Summary.precipitationChance = minute.precipitationChance;
-                        Summary.precipitationIntensity = minute.precipitationIntensity;
-                        //Summary.beginCondition = minute.condition;
-                        //Summary.endCondition = ""; // 重置
-                        Summary.maxCondition = minute.condition; // 重置
-                        Summary.clear = minute.clear;
-                    } else {
-                        // 条件相同，更新最大值
-                        Summary.precipitationChance = Math.max(Summary.precipitationChance, minute.precipitationChance);
-                        Summary.precipitationIntensity = Math.max(Summary.precipitationIntensity, minute.precipitationIntensity);
-                        if (Summary.precipitationIntensity === minute.precipitationIntensity) Summary.maxCondition = minute.condition;
-                    }
-                    break;
+                Summary = {
+                    condition: formatCondition(minute.summaryCondition),
+                    startTime: minute.startTime,
+                    precipitationChance: minute.precipitationChance,
+                    precipitationIntensity: minute.precipitationIntensity,
+                    maxCondition: minute.condition,
+                    clear: minute.clear,
+                };
+            } else {
+                Summary.precipitationChance = Math.max(Summary.precipitationChance, minute.precipitationChance);
+                Summary.precipitationIntensity = Math.max(Summary.precipitationIntensity, minute.precipitationIntensity);
+                if (Summary.precipitationIntensity === minute.precipitationIntensity) Summary.maxCondition = minute.condition;
             }
         }
-        Console.debug(`Summaries: ${JSON.stringify(Summaries, null, 2)}`);
+        if (version === "v3") {
+            delete Summary.endTime;
+        } else {
+            Summary.endTime = 0; // ⚠️WK2 空值写零，WK3 开放式末段省略 endTime
+        }
+        if (isDebug) Console.debug(`Summaries[${Length - 1}]`, JSON.stringify({ ...minutes[Length - 1], ...Summary }, null, 2));
+        Summaries.push({ ...Summary });
+        if (isDebug) Console.debug(`Summaries: ${JSON.stringify(Summaries, null, 2)}`);
         Console.info("✅ Summary");
         return Summaries;
     }
@@ -297,7 +261,7 @@ export default class ForecastNextHour {
         Console.info("☑️ Condition");
         const Conditions = [];
         if (!summaries.length) {
-            Console.debug(`Conditions: ${JSON.stringify(Conditions, null, 2)}`);
+            if (Console.logLevel === "DEBUG" || Console.logLevel === "ALL") Console.debug(`Conditions: ${JSON.stringify(Conditions, null, 2)}`);
             Console.info("✅ Condition");
             return Conditions;
         }
@@ -307,7 +271,7 @@ export default class ForecastNextHour {
         for (let i = 1; i < summaries.length; i++) {
             if (summaries[i - 1].clear === summaries[i].clear) {
                 Console.warn("Condition", `Adjacent summaries have the same clear state at indexes ${i - 1} and ${i}`);
-                Console.debug(`Conditions: ${JSON.stringify(Conditions, null, 2)}`);
+                if (Console.logLevel === "DEBUG" || Console.logLevel === "ALL") Console.debug(`Conditions: ${JSON.stringify(Conditions, null, 2)}`);
                 Console.info("✅ Condition");
                 return Conditions;
             }
@@ -388,7 +352,7 @@ export default class ForecastNextHour {
             if (!supported) Console.warn("Condition", `Unsupported ConditionType: ${condition.beginCondition}/${condition.endCondition}`);
             return supported;
         });
-        Console.debug(`Conditions: ${JSON.stringify(safeConditions, null, 2)}`);
+        if (Console.logLevel === "DEBUG" || Console.logLevel === "ALL") Console.debug(`Conditions: ${JSON.stringify(safeConditions, null, 2)}`);
         Console.info("✅ Condition");
         return safeConditions;
     }

@@ -94,6 +94,7 @@ export async function Response($request, $response) {
                             if (url.pathname.startsWith("/api/v3/weather/")) {
                                 Console.info("🟪 WeatherKit.api.v3.weather (JSON)");
                                 const parameters = parseWeatherKitURL(url);
+                                parameters.country = resolveCountryForResponse(url, parameters);
                                 const dataSets = parameters.dataSets.filter(dataSet => Settings.DataSets.includes(dataSet) && ["airQuality", "currentWeather", "forecastDaily", "forecastHourly", "forecastNextHour", "weatherAlerts"].includes(dataSet));
                                 let changed = false;
                                 if (dataSets.length > 0) {
@@ -167,7 +168,7 @@ export async function Response($request, $response) {
                                     $response.body = text;
                                 }
                             } else if (url.pathname.startsWith("/api/v1/availability/")) {
-                                Console.debug(`body: ${JSON.stringify(body)}`);
+                                if (Console.logLevel === "DEBUG" || Console.logLevel === "ALL") Console.debug(`body: ${JSON.stringify(body)}`);
                                 body = mergeWeatherKitAvailability(body, Configs?.Availability?.v2);
                             }
                             break;
@@ -199,6 +200,7 @@ export async function Response($request, $response) {
                                 case url.pathname.startsWith("/api/v2/weather/"): {
                                     Console.info("🟦 WeatherKit.api.v2.weather");
                                     const parameters = parseWeatherKitURL(url);
+                                    parameters.country = resolveCountryForResponse(url, parameters);
                                     const dataSets = parameters.dataSets.filter(dataSet => Settings.DataSets.includes(dataSet));
                                     const rootNames = dataSets.map(dataSet => Configs.DataSets[dataSet] ?? dataSet);
                                     body = WeatherKit2.decode(ByteBuffer, rootNames);
@@ -241,7 +243,7 @@ export async function Response($request, $response) {
                                                     break;
                                                 }
                                                 case "forecastNextHour": {
-                                                    Console.debug(`body.forecastNextHour: ${JSON.stringify(body?.forecastNextHour, null, 2)}`);
+                                                    if (Console.logLevel === "DEBUG" || Console.logLevel === "ALL") Console.debug(`body.forecastNextHour: ${JSON.stringify(body?.forecastNextHour, null, 2)}`);
                                                     if (Settings?.LogLevel === "DEBUG" || Settings?.LogLevel === "ALL") {
                                                         matchEnum.conditionType();
                                                         matchEnum.forecastToken();
@@ -253,7 +255,7 @@ export async function Response($request, $response) {
                                                     if (Settings?.LogLevel === "DEBUG" || Settings?.LogLevel === "ALL") {
                                                         matchEnum.placementType();
                                                     }
-                                                    Console.debug(`body.news: ${JSON.stringify(body?.news, null, 2)}`);
+                                                    if (Console.logLevel === "DEBUG" || Console.logLevel === "ALL") Console.debug(`body.news: ${JSON.stringify(body?.news, null, 2)}`);
                                                     break;
                                                 }
                                                 case "weatherAlerts": {
@@ -266,11 +268,11 @@ export async function Response($request, $response) {
                                                         matchEnum.responseType();
                                                     }
                                                     body.weatherAlerts = await InjectWeatherAlerts(body.weatherAlerts, Settings, enviroments);
-                                                    Console.debug(`body.weatherAlerts: ${JSON.stringify(body?.weatherAlerts, null, 2)}`);
+                                                    if (Console.logLevel === "DEBUG" || Console.logLevel === "ALL") Console.debug(`body.weatherAlerts: ${JSON.stringify(body?.weatherAlerts, null, 2)}`);
                                                     break;
                                                 }
                                                 case "locationInfo": {
-                                                    Console.debug(`body.locationInfo: ${JSON.stringify(body?.locationInfo, null, 2)}`);
+                                                    if (Console.logLevel === "DEBUG" || Console.logLevel === "ALL") Console.debug(`body.locationInfo: ${JSON.stringify(body?.locationInfo, null, 2)}`);
                                                     break;
                                                 }
                                                 default:
@@ -286,6 +288,7 @@ export async function Response($request, $response) {
                                 case url.pathname.startsWith("/api/v3/weather/"): {
                                     Console.info("🟪 WeatherKit.api.v3.weather");
                                     const parameters = parseWeatherKitURL(url);
+                                    parameters.country = resolveCountryForResponse(url, parameters);
                                     // 解码选中的可注入产品（注入用）与仅做归属清理的非注入产品（兜底清理用）；
                                     // 其余根产品保持原始 arena；解码失败的产品保留原始 arena，不参与注入与重写。
                                     const dataSets = parameters.dataSets.filter(dataSet => Settings.DataSets.includes(dataSet) && ["airQuality", "currentWeather", "forecastDaily", "forecastHourly", "forecastNextHour", "weatherAlerts"].includes(dataSet));
@@ -312,7 +315,7 @@ export async function Response($request, $response) {
                                     const replaceWeather = async (name, inject) => {
                                         const original = body[name];
                                         try {
-                                            const copy = original ? structuredClone(original) : undefined;
+                                            const copy = name === "weatherAlerts" ? (original ? structuredClone(original) : undefined) : original;
                                             const result = await inject(copy, Settings, enviroments);
                                             if (result?.metadata && result.metadata.temporarilyUnavailable !== true) {
                                                 const metadataChanged =
@@ -355,7 +358,7 @@ export async function Response($request, $response) {
                                                     break;
                                                 }
                                                 case "forecastNextHour": {
-                                                    Console.debug(`body.forecastNextHour: ${JSON.stringify(body?.forecastNextHour, null, 2)}`);
+                                                    if (Console.logLevel === "DEBUG" || Console.logLevel === "ALL") Console.debug(`body.forecastNextHour: ${JSON.stringify(body?.forecastNextHour, null, 2)}`);
                                                     if (Settings?.LogLevel === "DEBUG" || Settings?.LogLevel === "ALL") {
                                                         matchEnum.conditionType();
                                                         matchEnum.forecastToken();
@@ -386,92 +389,7 @@ export async function Response($request, $response) {
                                     sanitizeResponseMetadata(body, patch);
                                     adaptWK3ConditionCode(patch);
                                     adaptWK3PrecipitationAmount(patch);
-                                    if (Object.keys(patch).length > 0) {
-                                        rawBody = WeatherKit3.encode(ByteBuffer, patch);
-                                        try {
-                                            const bytes = rawBody instanceof Uint8Array ? rawBody : new Uint8Array(rawBody);
-                                            const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-                                            const root = dv.getUint32(0, true);
-                                            const rootVt = root - dv.getInt32(root, true);
-                                            const rootVtLen = dv.getUint16(rootVt, true);
-                                            const nhOff = 4 + 5 * 2 < rootVtLen ? dv.getUint16(rootVt + 4 + 5 * 2, true) : 0;
-                                            let c0_vt1 = -1;
-                                            let c0_end = null;
-                                            let s0_vt1 = -1;
-                                            let s0_end = null;
-                                            if (nhOff) {
-                                                const nh = root + nhOff + dv.getUint32(root + nhOff, true);
-                                                const nhVt = nh - dv.getInt32(nh, true);
-                                                const nhVtLen = dv.getUint16(nhVt, true);
-                                                const sumVecOff = 4 + 1 * 2 < nhVtLen ? dv.getUint16(nhVt + 4 + 1 * 2, true) : 0;
-                                                const condVecOff = 4 + 2 * 2 < nhVtLen ? dv.getUint16(nhVt + 4 + 2 * 2, true) : 0;
-                                                if (sumVecOff) {
-                                                    const sv = nh + sumVecOff + dv.getUint32(nh + sumVecOff, true);
-                                                    if (dv.getUint32(sv, true) > 0) {
-                                                        const s0 = sv + 4 + dv.getUint32(sv + 4, true);
-                                                        const s0Vt = s0 - dv.getInt32(s0, true);
-                                                        s0_vt1 = 4 + 1 * 2 < dv.getUint16(s0Vt, true) ? dv.getUint16(s0Vt + 6, true) : 0;
-                                                        s0_end = s0_vt1 ? dv.getInt32(s0 + s0_vt1, true) : null;
-                                                    }
-                                                }
-                                                if (condVecOff) {
-                                                    const cv = nh + condVecOff + dv.getUint32(nh + condVecOff, true);
-                                                    if (dv.getUint32(cv, true) > 0) {
-                                                        const c0 = cv + 4 + dv.getUint32(cv + 4, true);
-                                                        const c0Vt = c0 - dv.getInt32(c0, true);
-                                                        c0_vt1 = 4 + 1 * 2 < dv.getUint16(c0Vt, true) ? dv.getUint16(c0Vt + 6, true) : 0;
-                                                        c0_end = c0_vt1 ? dv.getInt32(c0 + c0_vt1, true) : null;
-                                                    }
-                                                }
-                                            }
-                                            const cw = patch.currentWeather ?? body.currentWeather;
-                                            const nhJs = patch.forecastNextHour ?? body.forecastNextHour;
-                                            const mins = nhJs?.minutes ?? [];
-                                            const nz = mins.filter(m => (m?.perceivedPrecipitationIntensity ?? 0) >= 0.1).length;
-                                            Console.warn(
-                                                "[WK3-DIAG]",
-                                                JSON.stringify({
-                                                    lat: url.pathname.split("/")[5],
-                                                    lon: url.pathname.split("/")[6],
-                                                    cw_patched: Boolean(patch.currentWeather),
-                                                    nh_patched: Boolean(patch.forecastNextHour),
-                                                    cw: cw
-                                                        ? {
-                                                              cond: cw.conditionCode,
-                                                              pInt: cw.precipitationIntensity,
-                                                              perc: cw.perceivedPrecipitationIntensity,
-                                                              exp_read: (cw.metadata?.expireTime ?? 0) - (cw.metadata?.readTime ?? 0),
-                                                          }
-                                                        : null,
-                                                    nh_cond: (nhJs?.condition ?? []).map(c => ({
-                                                        tok: c.forecastToken,
-                                                        b: c.beginCondition,
-                                                        e: c.endCondition,
-                                                        st: c.startTime,
-                                                        et: c.endTime,
-                                                    })),
-                                                    nh_sum: (nhJs?.summary ?? []).map(s => ({
-                                                        cond: s.condition,
-                                                        pInt: s.precipitationIntensity,
-                                                        ch: s.precipitationChance,
-                                                        st: s.startTime,
-                                                        et: s.endTime,
-                                                    })),
-                                                    min0: mins[0]
-                                                        ? {
-                                                              pInt: mins[0].precipitationIntensity,
-                                                              perc: mins[0].perceivedPrecipitationIntensity,
-                                                              ch: mins[0].precipitationChance,
-                                                          }
-                                                        : null,
-                                                    nz_cnt: nz,
-                                                    fb_vt: { c0_vt1, c0_end, s0_vt1, s0_end },
-                                                }),
-                                            );
-                                        } catch (e) {
-                                            Console.warn("[WK3-DIAG-ERR]", e?.message ?? String(e));
-                                        }
-                                    }
+                                    if (Object.keys(patch).length > 0) rawBody = WeatherKit3.encode(ByteBuffer, patch);
                                     break;
                                 }
                             }
@@ -591,24 +509,12 @@ export function syncCurrentConditionWithNextHour(currentWeather, forecastNextHou
     if (!currentWeather || !forecastNextHour) return false;
     const isConditionArray = Array.isArray(currentWeather.conditionCode);
     const currentCondition = isConditionArray ? currentWeather.conditionCode[0] : currentWeather.conditionCode;
-    const noRainConditions = new Set([
-        "CLEAR",
-        "MOSTLY_CLEAR",
-        "PARTLY_CLOUDY",
-        "MOSTLY_CLOUDY",
-        "CLOUDY",
-        "HAZE",
-        "FOGGY",
-        "WINDY",
-        "BREEZY",
-    ]);
     const firstMinute = Array.isArray(forecastNextHour.minutes) ? forecastNextHour.minutes[0] : undefined;
     const firstIntensity = Number(firstMinute?.precipitationIntensity);
     const hasPerceived = typeof firstMinute?.perceivedPrecipitationIntensity === "number" && Number.isFinite(firstMinute.perceivedPrecipitationIntensity);
     const firstSummary = Array.isArray(forecastNextHour.summary) ? forecastNextHour.summary[0] : undefined;
     const summaryConditions = Array.isArray(firstSummary?.condition) ? firstSummary.condition : firstSummary?.condition == null ? [] : [firstSummary.condition];
-    const rainSummaryConditions = new Set(["RAIN", "DRIZZLE", "HEAVY_RAIN", "THUNDERSTORMS", "FREEZING_DRIZZLE", "POSSIBLE_DRIZZLE"]);
-    const summaryRaining = firstSummary?.clear === false && summaryConditions.some(condition => rainSummaryConditions.has(condition));
+    const summaryRaining = firstSummary?.clear === false && summaryConditions.some(condition => RAIN_SUMMARY_CONDITIONS.has(condition));
     const rainingNow = hasPerceived
         ? firstMinute.perceivedPrecipitationIntensity >= 0.1
         : (Number.isFinite(firstIntensity) && firstIntensity > 0) || summaryRaining;
@@ -616,7 +522,7 @@ export function syncCurrentConditionWithNextHour(currentWeather, forecastNextHou
 
     let changed = false;
 
-    if (noRainConditions.has(currentCondition)) {
+    if (NO_RAIN_CONDITIONS.has(currentCondition)) {
         let nextCondition;
         if (typeof firstMinute?.condition === "string" && firstMinute.condition && firstMinute.condition !== "CLEAR") {
             nextCondition = firstMinute.condition;
@@ -655,9 +561,34 @@ export function syncCurrentConditionWithNextHour(currentWeather, forecastNextHou
     return changed;
 }
 
+/**
+ * 当请求 URL 缺失 country 查询参数（如美区设置下的小组件请求）时，
+ * 按国内经纬度兜底推断国家代码，避免将国内坐标误判为国外（Issue #100）。
+ * 显式传入 country 参数时始终以显式参数优先。
+ * @param {URL} url - 请求 URL 对象
+ * @param {{ country?: string, latitude?: string | number, longitude?: string | number }} parameters - parseWeatherKitURL 解析结果
+ * @returns {string | undefined}
+ */
+export function resolveCountryForResponse(url, parameters) {
+    const explicitCountry = url?.searchParams?.get("country")?.toUpperCase();
+    if (explicitCountry) return explicitCountry;
+    const lat = Number(parameters?.latitude);
+    const lon = Number(parameters?.longitude);
+    if (Number.isFinite(lat) && Number.isFinite(lon)) {
+        if (lat >= 22.13 && lat <= 22.50 && lon >= 113.82 && lon <= 114.41) return "HK";
+        if (lat >= 22.09 && lat <= 22.25 && lon >= 113.52 && lon <= 113.65) return "MO";
+        if (lat >= 21.7 && lat <= 25.4 && lon >= 119.3 && lon <= 122.1) return "TW";
+        if (lat >= 18 && lat <= 54 && lon >= 73 && lon <= 135) return "CN";
+    }
+    return parameters?.country;
+}
+
 
 const APPLE_ATTRIBUTION_URL = "https://developer.apple.com/weatherkit/data-source-attribution/";
 const THIRD_PARTY_ATTRIBUTION_PATTERN = /qweather\.com|caiyunapp\.com/i;
+const NO_RAIN_CONDITIONS = new Set(["CLEAR", "MOSTLY_CLEAR", "PARTLY_CLOUDY", "MOSTLY_CLOUDY", "CLOUDY", "HAZE", "FOGGY", "WINDY", "BREEZY"]);
+const RAIN_SUMMARY_CONDITIONS = new Set(["RAIN", "DRIZZLE", "HEAVY_RAIN", "THUNDERSTORMS", "FREEZING_DRIZZLE", "POSSIBLE_DRIZZLE"]);
+const SANITIZE_SKIP_KEYS = new Set(["hours", "minutes", "summary", "condition", "pollutants", "parameters"]);
 
 /**
  * 递归清理对象内所有归属/图标字段：删除 providerLogo，把命中的第三方归属链接统一为苹果官方地址。
@@ -685,6 +616,7 @@ function sanitizeResponseObject(value, seen = new Set()) {
         }
     }
     for (const key of Object.keys(value)) {
+        if (SANITIZE_SKIP_KEYS.has(key)) continue;
         if (sanitizeResponseObject(value[key], seen)) changed = true;
     }
     return changed;
@@ -744,10 +676,12 @@ async function InjectForecastDaily(forecastDaily, Settings, enviroments) {
         }
     }
     if (newForecastDaily?.metadata) {
-        forecastDaily.metadata = { ...forecastDaily?.metadata, ...newForecastDaily.metadata };
-        Weather.mergeForecast(forecastDaily?.days, newForecastDaily?.days);
+        forecastDaily = {
+            ...forecastDaily,
+            metadata: { ...forecastDaily?.metadata, ...newForecastDaily.metadata },
+            days: Weather.mergeForecast(forecastDaily?.days, newForecastDaily?.days, { mutate: false }),
+        };
         forecastDaily.metadata.providerLogo ||= providerNameToLogo(forecastDaily.metadata.providerName);
-        //Console.debug(`forecastDaily: ${JSON.stringify(forecastDaily, null, 2)}`);
     }
     Console.info("✅ InjectForecastDaily");
     return forecastDaily;
@@ -785,10 +719,12 @@ async function InjectForecastHourly(forecastHourly, Settings, enviroments) {
         }
     }
     if (newForecastHourly?.metadata) {
-        forecastHourly.metadata = { ...forecastHourly?.metadata, ...newForecastHourly.metadata };
-        forecastHourly.hours = Weather.mergeForecast(forecastHourly?.hours, newForecastHourly?.hours);
+        forecastHourly = {
+            ...forecastHourly,
+            metadata: { ...forecastHourly?.metadata, ...newForecastHourly.metadata },
+            hours: Weather.mergeForecast(forecastHourly?.hours, newForecastHourly?.hours, { mutate: false }),
+        };
         forecastHourly.metadata.providerLogo ||= providerNameToLogo(forecastHourly.metadata.providerName);
-        //Console.debug(`forecastHourly: ${JSON.stringify(forecastHourly, null, 2)}`);
     }
     Console.info("✅ InjectForecastHourly");
     return forecastHourly;
@@ -827,7 +763,7 @@ async function InjectForecastNextHour(forecastNextHour, Settings, enviroments) {
         newForecastNextHour.metadata = { ...forecastNextHour?.metadata, ...newForecastNextHour.metadata };
         forecastNextHour = { ...forecastNextHour, ...newForecastNextHour };
         forecastNextHour.metadata.providerLogo ||= providerNameToLogo(forecastNextHour.metadata.providerName);
-        Console.debug(`forecastNextHour: ${JSON.stringify(forecastNextHour, null, 2)}`);
+        if (Console.logLevel === "DEBUG" || Console.logLevel === "ALL") Console.debug(`forecastNextHour: ${JSON.stringify(forecastNextHour, null, 2)}`);
     }
     Console.info("✅ InjectForecastNextHour");
     return forecastNextHour;
@@ -928,7 +864,7 @@ async function InjectAirQuality(airQuality, Settings, Caches, enviroments) {
     };
     // 展开后显式删除透传进来的 providerLogo（苹果原厂元数据可能自带第三方图标链接）
     delete airQuality.metadata.providerLogo;
-    Console.debug(`airQuality: ${JSON.stringify(airQuality, null, 2)}`);
+    if (Console.logLevel === "DEBUG" || Console.logLevel === "ALL") Console.debug(`airQuality: ${JSON.stringify(airQuality, null, 2)}`);
     return airQuality;
 }
 

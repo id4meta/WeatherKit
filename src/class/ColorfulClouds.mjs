@@ -30,6 +30,8 @@ export default class ColorfulClouds {
         realtime: {},
     };
 
+    #inflight = {};
+
     #Config = {
         Language: {
             "": "zh_CN",
@@ -213,47 +215,54 @@ export default class ColorfulClouds {
             Console.info("✅ RealTime", "Using cache");
             return this.#cache.realtime;
         }
+        if (this.#inflight.realtime) {
+            Console.info("✅ RealTime", "Joining in-flight request");
+            return this.#inflight.realtime;
+        }
 
         const request = {
             url: `${this.endpoint}/realtime?lang=${this.language}&unit=metric:v2&alert=true`,
             headers: this.headers,
         };
-        try {
-            const body = await fetch(request).then(response => JSON.parse(response?.body ?? "{}"));
-            switch (body?.status) {
-                case "ok": {
-                    switch (body?.result?.realtime?.status) {
-                        case "ok": {
-                            this.#cache.realtime = body;
-                            break;
+        this.#inflight.realtime = (async () => {
+            try {
+                const body = await fetch(request).then(response => JSON.parse(response?.body ?? "{}"));
+                switch (body?.status) {
+                    case "ok": {
+                        switch (body?.result?.realtime?.status) {
+                            case "ok": {
+                                this.#cache.realtime = body;
+                                break;
+                            }
+                            case "error":
+                            case undefined:
+                                throw Error(JSON.stringify({ status: body?.result?.realtime?.status, reason: body?.result?.realtime }));
                         }
-                        case "error":
-                        case undefined:
-                            throw Error(JSON.stringify({ status: body?.result?.realtime?.status, reason: body?.result?.realtime }));
+                        switch (body?.result?.alert?.status) {
+                            case "ok":
+                                this.#cache.alert = body.result.alert;
+                                break;
+                            case "error":
+                            case undefined:
+                                break;
+                        }
+                        Console.info("✅ RealTime");
+                        return body;
                     }
-                    switch (body?.result?.alert?.status) {
-                        case "ok":
-                            this.#cache.alert = body.result.alert;
-                            break;
-                        case "error":
-                        case undefined:
-                            break;
-                    }
-                    Console.info("✅ RealTime");
-                    return body;
+                    case "error":
+                    case "failed":
+                    case undefined:
+                        throw Error(JSON.stringify(body ?? {}));
                 }
-                case "error":
-                case "failed":
-                case undefined:
-                    throw Error(JSON.stringify(body ?? {}));
+            } catch (error) {
+                Console.error(`RealTime: ${error}`);
+            } finally {
+                delete this.#inflight.realtime;
+                Console.info("✅ RealTime");
             }
-        } catch (error) {
-            Console.error(`RealTime: ${error}`);
-        } finally {
-            //Console.debug(`airQuality: ${JSON.stringify(airQuality, null, 2)}`);
-            Console.info("✅ RealTime");
-        }
-        return {};
+            return {};
+        })();
+        return this.#inflight.realtime;
     }
 
     async Minutely() {
