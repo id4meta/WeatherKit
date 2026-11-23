@@ -140,6 +140,47 @@ export default class ColorfulClouds {
         },
     };
 
+    #BuildCacheKey(kind, extraQuery = "", coordPrecision = 3) {
+        const lon = Number(this.longitude);
+        const lat = Number(this.latitude);
+        const lonKey = Number.isFinite(lon) ? lon.toFixed(coordPrecision) : String(this.longitude ?? "");
+        const latKey = Number.isFinite(lat) ? lat.toFixed(coordPrecision) : String(this.latitude ?? "");
+        const suffix = extraQuery ? `&${extraQuery}` : "";
+        return `https://cache.internal/caiyun/v2.6/${kind}/${lonKey},${latKey}?lang=${encodeURIComponent(this.language)}${suffix}`;
+    }
+
+    async #FetchJsonWithEdgeCache(cacheKey, ttlSeconds, fetcher, subfield = "") {
+        const isCacheable = body => body?.status === "ok" && (!subfield || body?.result?.[subfield]?.status === "ok");
+        const cache = globalThis.caches?.default;
+        if (!cache || !cacheKey || !(ttlSeconds > 0)) {
+            return fetcher();
+        }
+        const cacheReq = new Request(cacheKey, { method: "GET" });
+        try {
+            const cached = await cache.match(cacheReq);
+            if (cached) {
+                const parsed = await cached.json();
+                if (isCacheable(parsed)) {
+                    return parsed;
+                }
+            }
+        } catch {}
+
+        const body = await fetcher();
+        if (isCacheable(body)) {
+            try {
+                const cacheResp = new Response(JSON.stringify(body), {
+                    headers: {
+                        "Content-Type": "application/json; charset=utf-8",
+                        "Cache-Control": `public, max-age=${ttlSeconds}`,
+                    },
+                });
+                await cache.put(cacheReq, cacheResp);
+            } catch {}
+        }
+        return body;
+    }
+
     async #RealTime() {
         Console.info("☑️ RealTime");
 
@@ -158,7 +199,12 @@ export default class ColorfulClouds {
         };
         this.#inflight.realtime = (async () => {
             try {
-                const body = await fetch(request).then(response => JSON.parse(response?.body ?? "{}"));
+                const body = await this.#FetchJsonWithEdgeCache(
+                    this.#BuildCacheKey("realtime", "", 3),
+                    60,
+                    () => fetch(request).then(response => JSON.parse(response?.body ?? "{}")),
+                    "realtime",
+                );
                 switch (body?.status) {
                     case "ok": {
                         switch (body?.result?.realtime?.status) {
@@ -215,7 +261,12 @@ export default class ColorfulClouds {
         };
         this.#inflight.minutely = (async () => {
             try {
-                const body = await fetch(request).then(response => JSON.parse(response?.body ?? "{}"));
+                const body = await this.#FetchJsonWithEdgeCache(
+                    this.#BuildCacheKey("minutely", "", 3),
+                    60,
+                    () => fetch(request).then(response => JSON.parse(response?.body ?? "{}")),
+                    "minutely",
+                );
                 switch (body?.status) {
                     case "ok": {
                         switch (body?.result?.minutely?.status) {
@@ -425,7 +476,24 @@ export default class ColorfulClouds {
         };
         if (begin) request.url += `&begin=${begin}`;
         try {
-            const body = await fetch(request).then(response => JSON.parse(response?.body ?? "{}"));
+            const fetchHourly = () => fetch(request).then(response => JSON.parse(response?.body ?? "{}"));
+            let body;
+            if (begin === undefined) {
+                body = await this.#FetchJsonWithEdgeCache(
+                    this.#BuildCacheKey("hourly", `steps=${hourlysteps}`, 2),
+                    300,
+                    fetchHourly,
+                    "hourly",
+                );
+            } else {
+                const beginHour = Math.floor(Number(begin) / 3600) * 3600;
+                body = await this.#FetchJsonWithEdgeCache(
+                    this.#BuildCacheKey("hourly", `steps=${hourlysteps}&begin=${beginHour}`, 2),
+                    1800,
+                    fetchHourly,
+                    "hourly",
+                );
+            }
             switch (body?.status) {
                 case "ok":
                     switch (body?.result?.hourly?.status) {
@@ -461,7 +529,15 @@ export default class ColorfulClouds {
         if (begin) request.url += `&begin=${begin}`;
         let forecastDaily;
         try {
-            const body = await fetch(request).then(response => JSON.parse(response?.body ?? "{}"));
+            const fetchDaily = () => fetch(request).then(response => JSON.parse(response?.body ?? "{}"));
+            const body = !begin
+                ? await this.#FetchJsonWithEdgeCache(
+                    this.#BuildCacheKey("daily", `steps=${dailysteps}`, 2),
+                    600,
+                    fetchDaily,
+                    "daily",
+                )
+                : await fetchDaily();
             switch (body?.status) {
                 case "ok":
                     switch (body?.result?.daily?.status) {
