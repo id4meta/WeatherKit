@@ -509,7 +509,7 @@ export default class ColorfulClouds {
                                     // Caiyun `avg` is an average rate (mm/h), not WeatherKit's accumulated amount (mm).
                                     // Leave both amount fields absent so the merge keeps Apple's paired scalar/by-type totals.
                                     // precipitationAmountByType: [], // Not given
-                                    precipitationChance: body?.result?.daily?.precipitation?.[i]?.probability,
+                                    precipitationChance: this.#RoundUInt(body?.result?.daily?.precipitation?.[i]?.probability, 0, 100),
                                     // precipitationType: "", // Not given
                                     // snowfallAmount: 0, // Not given
                                     // solarMidnight: 0, // Not given
@@ -543,14 +543,14 @@ export default class ColorfulClouds {
                                         // humidityMin: Math.round(body?.result?.daily?.humidity?.[i]?.min * 100), // Not given
                                         // Caiyun `avg` is mm/h and cannot replace WeatherKit's accumulated precipitation total.
                                         // precipitationAmountByType: [], // Not given
-                                        precipitationChance: body?.result?.daily?.precipitation_08h_20h?.[i]?.probability,
+                                        precipitationChance: this.#RoundUInt(body?.result?.daily?.precipitation_08h_20h?.[i]?.probability, 0, 100),
                                         // precipitationType: "", // Not given
                                         // snowfallAmount: 0, // Not given
                                         temperatureMax: body?.result?.daily?.temperature_08h_20h?.[i]?.max,
                                         temperatureMin: body?.result?.daily?.temperature_08h_20h?.[i]?.min,
                                         // visibilityMax: body?.result?.daily?.visibility?.[i]?.max * 1000, // Not given
                                         // visibilityMin: body?.result?.daily?.visibility?.[i]?.min * 1000, // Not given
-                                        windDirection: body?.result?.daily?.wind_08h_20h?.[i]?.avg?.direction,
+                                        windDirection: this.#RoundUInt(body?.result?.daily?.wind_08h_20h?.[i]?.avg?.direction, 0, 360),
                                         // windGustSpeedMax: 0, // Not given
                                         windSpeed: body?.result?.daily?.wind_08h_20h?.[i]?.avg?.speed,
                                         windSpeedMax: body?.result?.daily?.wind_08h_20h?.[i]?.max?.speed,
@@ -567,14 +567,14 @@ export default class ColorfulClouds {
                                         // humidityMin: Math.round(body?.result?.daily?.humidity?.[i]?.min * 100), // Not given
                                         // Caiyun `avg` is mm/h and cannot replace WeatherKit's accumulated precipitation total.
                                         // precipitationAmountByType: [], // Not given
-                                        precipitationChance: body?.result?.daily?.precipitation_20h_32h?.[i]?.probability,
+                                        precipitationChance: this.#RoundUInt(body?.result?.daily?.precipitation_20h_32h?.[i]?.probability, 0, 100),
                                         // precipitationType: "", // Not given
                                         // snowfallAmount: 0, // Not given
                                         temperatureMax: body?.result?.daily?.temperature_20h_32h?.[i]?.max,
                                         temperatureMin: body?.result?.daily?.temperature_20h_32h?.[i]?.min,
                                         // visibilityMax: body?.result?.daily?.visibility?.[i]?.max * 1000, // Not given
                                         // visibilityMin: body?.result?.daily?.visibility?.[i]?.min * 1000, // Not given
-                                        windDirection: body?.result?.daily?.wind_20h_32h?.[i]?.avg?.direction,
+                                        windDirection: this.#RoundUInt(body?.result?.daily?.wind_20h_32h?.[i]?.avg?.direction, 0, 360),
                                         // windGustSpeedMax: 0, // Not given
                                         windSpeed: body?.result?.daily?.wind_20h_32h?.[i]?.avg?.speed,
                                         windSpeedMax: body?.result?.daily?.wind_20h_32h?.[i]?.max?.speed,
@@ -600,6 +600,12 @@ export default class ColorfulClouds {
             Console.info("✅ Daily");
         }
         return forecastDaily;
+    }
+
+    #RoundUInt(value, min = 0, max = 65535) {
+        const n = Number(value);
+        if (!Number.isFinite(n)) return undefined;
+        return Math.min(max, Math.max(min, Math.round(n)));
     }
 
     #Metadata(reportedTime, location = [this.latitude, this.longitude], temporarilyUnavailable = false, expireInterval = 60 * 60) {
@@ -794,7 +800,7 @@ export default class ColorfulClouds {
             temperature: realtime.result.realtime.temperature,
             temperatureApparent: realtime.result.realtime.apparent_temperature,
             visibility: realtime.result.realtime.visibility * 1000,
-            windDirection: realtime.result.realtime.wind.direction,
+            windDirection: this.#RoundUInt(realtime.result.realtime.wind.direction, 0, 360),
             windSpeed: realtime.result.realtime.wind.speed,
         };
     }
@@ -864,7 +870,7 @@ export default class ColorfulClouds {
                 humidity: Math.round(hourly.result.hourly.humidity[i].value * 100),
                 // perceivedPrecipitationIntensity: "", // Not given
                 precipitationAmount: hourly.result.hourly.precipitation[i].value,
-                precipitationChance: hourly.result.hourly.precipitation[i].probability,
+                precipitationChance: this.#RoundUInt(hourly.result.hourly.precipitation[i].probability, 0, 100),
                 // precipitationIntensity: 0, // Not given
                 // precipitationType: "", // Not given
                 pressure: hourly.result.hourly.pressure[i].value / 100,
@@ -876,7 +882,7 @@ export default class ColorfulClouds {
                 // temperatureDewPoint: 0, // Not given
                 // uvIndex: 0, // Not given
                 visibility: hourly.result.hourly.visibility[i].value * 1000,
-                windDirection: hourly.result.hourly.wind[i].direction,
+                windDirection: this.#RoundUInt(hourly.result.hourly.wind[i].direction, 0, 360),
                 // windGust: 0, // Not given
                 windSpeed: hourly.result.hourly.wind[i].speed,
             })),
