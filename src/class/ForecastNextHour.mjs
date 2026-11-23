@@ -6,14 +6,15 @@ export default class ForecastNextHour {
     Version = "v1.6.5";
     Author = "iRingo";
 
-    // iOS 27 hides NextHour data once its metadata is more than 15 minutes old,
-    // but weatherd only re-fetches when the cached response expires, which is
-    // driven by the ~1h currentWeather cache. A 10-minute expiry therefore hid
-    // the card with no refresh in flight (real case 2026-11-23: read 09:36,
-    // expired 09:46, still no request at 10:01). Align with currentWeather
-    // (1h); Minutely() additionally caps at forecastEnd so the claimed
-    // validity never outruns the minute data itself.
-    static ExpirationInterval = 60 * 60;
+    // iOS 27 enforces a 15-minute client-side relevance hard cutoff on
+    // NextHour metadata (confirmed on-device 2026-11-23: with a 60-minute
+    // expiry the card still hid after 15 minutes, and the long expiry
+    // blocked weatherd from issuing a standalone
+    // ?dataSets=forecastNextHour refresh before the cutoff). Use 14
+    // minutes to take the full window while leaving a 1-minute buffer
+    // for the refresh. Minutely() additionally caps at forecastEnd so
+    // the claimed validity never outruns the minute data itself.
+    static ExpirationInterval = 14 * 60;
 
     static #Configs = {
         Pollutants: {
