@@ -314,7 +314,15 @@ export async function Response($request, $response) {
                                         try {
                                             const copy = original ? structuredClone(original) : undefined;
                                             const result = await inject(copy, Settings, enviroments);
-                                            if (result?.metadata && result.metadata.temporarilyUnavailable !== true && JSON.stringify(result) !== JSON.stringify(original)) patch[name] = result;
+                                            if (result?.metadata && result.metadata.temporarilyUnavailable !== true) {
+                                                const metadataChanged =
+                                                    !original ||
+                                                    result.metadata.providerName !== original.metadata?.providerName ||
+                                                    result.metadata.readTime !== original.metadata?.readTime ||
+                                                    result.metadata.expireTime !== original.metadata?.expireTime ||
+                                                    result.detailsUrl !== original.detailsUrl;
+                                                if (metadataChanged || JSON.stringify(result) !== JSON.stringify(original)) patch[name] = result;
+                                            }
                                         } catch (error) {
                                             Console.warn("WeatherKit.api.v3.weather", `preserved ${name}: ${error?.name ?? "Error"}`);
                                         }
