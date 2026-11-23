@@ -602,7 +602,7 @@ export default class ColorfulClouds {
         return forecastDaily;
     }
 
-    #Metadata(reportedTime, location = [this.latitude, this.longitude], temporarilyUnavailable = false) {
+    #Metadata(reportedTime, location = [this.latitude, this.longitude], temporarilyUnavailable = false, expireInterval = 60 * 60) {
         const timeStamp = Math.trunc(Date.now() / 1000);
         const [latitude, longitude] = location;
         return {
@@ -610,7 +610,7 @@ export default class ColorfulClouds {
             providerName: "彩云天气",
             reportedTime: reportedTime ?? timeStamp,
             latitude,
-            expireTime: timeStamp + 60 * 60,
+            expireTime: timeStamp + expireInterval,
             attributionUrl: "https://developer.apple.com/weatherkit/data-source-attribution/",
             providerLogo: providerNameToLogo("彩云天气", this.version),
             temporarilyUnavailable,
@@ -778,13 +778,13 @@ export default class ColorfulClouds {
         if (!realtime.result) {
             Console.error("CurrentWeather", "无法获取realtime数");
             return {
-                metadata: this.#Metadata(undefined, undefined, true),
+                metadata: this.#Metadata(undefined, undefined, true, 5 * 60),
             };
         }
 
         Console.info("✅ CurrentWeather");
         return {
-            metadata: this.#Metadata(realtime.result.server_time, realtime.location),
+            metadata: this.#Metadata(realtime.result.server_time, realtime.location, false, 5 * 60),
             cloudCover: Math.round(realtime.result.realtime.cloudrate * 100),
             ...Weather.ConvertWeatherCodeField(realtime.result.realtime.skycon),
             humidity: Math.round(realtime.result.realtime.humidity * 100),
