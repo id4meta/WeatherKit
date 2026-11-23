@@ -314,6 +314,8 @@ export default class ColorfulClouds {
                             };
                             forecastNextHour.minutes.length = Math.min(85, forecastNextHour.minutes.length);
                             forecastNextHour.forecastEnd = minuteStemp + 60 * forecastNextHour.minutes.length;
+                            // 有效期不超过分钟预报本身的覆盖终点（短数据时收紧，空数据时不回拨过期时间）。
+                            if (forecastNextHour.forecastEnd > timeStamp) forecastNextHour.metadata.expireTime = Math.min(forecastNextHour.metadata.expireTime, forecastNextHour.forecastEnd);
                             forecastNextHour.minutes = ForecastNextHour.Minute(forecastNextHour.minutes, body?.result?.minutely?.description, "mmph");
                             forecastNextHour.summary = ForecastNextHour.Summary(forecastNextHour.minutes, this.version);
                             forecastNextHour.condition = ForecastNextHour.Condition(forecastNextHour.summary);
