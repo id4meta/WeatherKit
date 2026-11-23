@@ -399,7 +399,7 @@ export default class ForecastNextHour {
             // 轻微降水，可能感知不到
             perceivedPrecipitationIntensity = 0; // 轻微降水通常感知不到
         } else if (units === "mmph" && precipitationIntensity >= Range.NO[1]) {
-            const raw = 3 * (1 - Math.exp(-0.42812 * (precipitationIntensity ** 0.51645)));
+            const raw = 3 * (1 - Math.exp(-0.17117 * (precipitationIntensity ** 0.74272)));
             perceivedPrecipitationIntensity = Math.min(3, Math.max(0.1, raw));
         } else if (precipitationIntensity > Range.LIGHT[0] && precipitationIntensity <= Range.LIGHT[1]) {
             // 小雨，可以感知到；把 LIGHT 段映射到苹果天气可见区间 [0.1, 1.0]。

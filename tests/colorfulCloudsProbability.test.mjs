@@ -135,7 +135,7 @@ test("CurrentWeather converts a 15.0 mm/h local intensity to the Weibull perceiv
         const colorfulClouds = new ColorfulClouds({ country: "CN", language: "zh-CN", latitude: "22.54", longitude: "114.06" }, "test-token");
         const result = await colorfulClouds.CurrentWeather();
         assert.equal(result.precipitationIntensity, 15);
-        assert.ok(result.perceivedPrecipitationIntensity > 2.4 && result.perceivedPrecipitationIntensity < 2.6, `perceivedPrecipitationIntensity must be a Weibull value in (2.4, 2.6), got ${result.perceivedPrecipitationIntensity}`);
+        assert.ok(result.perceivedPrecipitationIntensity > 2.1 && result.perceivedPrecipitationIntensity < 2.25, `perceivedPrecipitationIntensity must be a Weibull value in (2.1, 2.25), got ${result.perceivedPrecipitationIntensity}`);
         assert.notEqual(result.perceivedPrecipitationIntensity, 15);
     } finally {
         globalThis.fetch = originalFetch;

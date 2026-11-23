@@ -5,6 +5,8 @@ globalThis.$environment = { "surge-version": "test" };
 globalThis.$persistentStore = { read: () => null, write: () => true };
 globalThis.$argument = { LogLevel: "OFF", Storage: "Argument" };
 const { adaptWK3ConditionCode, adaptWK3PrecipitationAmount, syncCurrentConditionWithNextHour, resolveCountryForResponse } = await import("../src/process/Response.dev.mjs");
+const { Request: RequestDev } = await import("../src/process/Request.dev.mjs");
+const { Request: RequestProd } = await import("../src/process/Request.mjs");
 
 // WK3 二进制分支形状适配：注入的标量 conditionCode 必须包回单元素数组，
 // 否则 WeatherKit3.encode.compile 报 Invalid WK3 vector（真机诊断 WK3_DIAG 已定位）。
@@ -205,4 +207,39 @@ test("syncCurrentConditionWithNextHour ignores sub-visible intensity without a p
     };
     assert.equal(syncCurrentConditionWithNextHour(currentWeather, forecastNextHour), false);
     assert.equal(currentWeather.conditionCode, "CLOUDY");
+});
+
+// Request() 在发往苹果上游前把国行港澳台请求的 country=CN 改写为 HK/MO/TW（第 40 轮）。
+// 最小 $request 按 tests/weatherKit3WeatherReplacement.test.mjs 的调用方式构造；
+// v2/v3 weather 分支不发真实网络请求，只改写 $request.url 后返回。
+const requestCountry = async (Request, latitude, longitude) => {
+    const $request = {
+        method: "GET",
+        url: `https://weatherkit.apple.com/api/v3/weather/zh-Hans-CN/${latitude}/${longitude}?country=CN&dataSets=currentWeather,forecastDaily,forecastHourly,weatherAlerts`,
+        headers: { "User-Agent": "WeatherKit_Weather_iOS_Version 27.3 (Build 24C5049f)" },
+    };
+    const { $request: rewritten } = await Request($request);
+    return new URL(rewritten.url).searchParams.get("country");
+};
+
+test("Request rewrites country=CN to TW for Taipei coordinates", async () => {
+    assert.equal(await requestCountry(RequestDev, "24.947", "121.328"), "TW");
+    assert.equal(await requestCountry(RequestProd, "24.947", "121.328"), "TW");
+});
+
+test("Request rewrites country=CN to HK for Hong Kong coordinates", async () => {
+    assert.equal(await requestCountry(RequestDev, "22.429", "114.077"), "HK");
+    assert.equal(await requestCountry(RequestProd, "22.429", "114.077"), "HK");
+});
+
+test("Request rewrites country=CN to MO for Macao coordinates", async () => {
+    assert.equal(await requestCountry(RequestDev, "22.202", "113.548"), "MO");
+    assert.equal(await requestCountry(RequestProd, "22.202", "113.548"), "MO");
+});
+
+test("Request keeps country=CN for domestic coordinates", async () => {
+    assert.equal(await requestCountry(RequestDev, "22.522", "114.059"), "CN");
+    assert.equal(await requestCountry(RequestProd, "22.522", "114.059"), "CN");
+    assert.equal(await requestCountry(RequestDev, "24.479", "118.089"), "CN");
+    assert.equal(await requestCountry(RequestProd, "24.479", "118.089"), "CN");
 });

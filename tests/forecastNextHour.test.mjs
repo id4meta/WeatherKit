@@ -337,17 +337,18 @@ test("Summary ignores rain beyond the 60-minute window in v3", () => {
 });
 
 test("ConvertPrecipitationIntensity follows the Weibull saturation curve for heavy rain", () => {
-    assert.ok(ForecastNextHour.ConvertPrecipitationIntensity(10, "mmph") > 2.0);
-    assert.ok(Math.abs(ForecastNextHour.ConvertPrecipitationIntensity(50, "mmph") - 2.881) < 0.005);
+    assert.ok(Math.abs(ForecastNextHour.ConvertPrecipitationIntensity(10, "mmph") - 1.835) < 0.005);
+    assert.ok(Math.abs(ForecastNextHour.ConvertPrecipitationIntensity(50, "mmph") - 2.868) < 0.005);
 });
 
 test("ConvertPrecipitationIntensity calibrates mmph to the Weibull saturation curve", () => {
     assert.equal(ForecastNextHour.ConvertPrecipitationIntensity(0, "mmph"), 0);
     assert.equal(ForecastNextHour.ConvertPrecipitationIntensity(0.03, "mmph"), 0);
-    assert.ok(ForecastNextHour.ConvertPrecipitationIntensity(0.08, "mmph") >= 0.1);
-    assert.ok(Math.abs(ForecastNextHour.ConvertPrecipitationIntensity(2.6655, "mmph") - 1.526) < 0.005);
-    assert.ok(Math.abs(ForecastNextHour.ConvertPrecipitationIntensity(6.2356, "mmph") - 2.003) < 0.005);
-    assert.ok(Math.abs(ForecastNextHour.ConvertPrecipitationIntensity(24.2901, "mmph") - 2.675) < 0.005);
+    assert.equal(ForecastNextHour.ConvertPrecipitationIntensity(0.08, "mmph"), 0.1);
+    assert.ok(Math.abs(ForecastNextHour.ConvertPrecipitationIntensity(1.0, "mmph") - 0.471) < 0.005);
+    assert.ok(Math.abs(ForecastNextHour.ConvertPrecipitationIntensity(3.44, "mmph") - 1.045) < 0.005);
+    assert.ok(Math.abs(ForecastNextHour.ConvertPrecipitationIntensity(11.33, "mmph") - 1.938) < 0.005);
+    assert.ok(Math.abs(ForecastNextHour.ConvertPrecipitationIntensity(51.3, "mmph") - 2.876) < 0.005);
     const extreme = ForecastNextHour.ConvertPrecipitationIntensity(100, "mmph");
     assert.ok(extreme < 3.0 && extreme > 2.95);
 });

@@ -6,6 +6,7 @@ import WeatherAlerts from "../class/WeatherAlerts.mjs";
 import database from "../function/database.mjs";
 import parseWeatherKitURL from "../function/parseWeatherKitURL.mjs";
 import setENV from "../function/setENV.mjs";
+import { resolveCountryForResponse } from "./Response.dev.mjs";
 /***************** Processing *****************/
 export async function Request($request) {
     // 构造回复数据
@@ -115,6 +116,15 @@ export async function Request($request) {
                                 }
                                 case url.pathname.startsWith("/api/v2/weather/"):
                                 case url.pathname.startsWith("/api/v3/weather/"): {
+                                    // 国行设备发出的港澳台请求带 country=CN：发往苹果上游前改写为 HK/MO/TW，
+                                    // 由上游直接返回港澳台原厂 AQI（第 40 轮）。
+                                    const resolvedCountry = resolveCountryForResponse(url, parameters);
+                                    if (resolvedCountry === "HK" || resolvedCountry === "MO" || resolvedCountry === "TW") {
+                                        const currentCountry = url.searchParams.get("country")?.toUpperCase();
+                                        if (!currentCountry || currentCountry === "CN") {
+                                            url.searchParams.set("country", resolvedCountry);
+                                        }
+                                    }
                                     // 解决 macOS 天气 app 如果使用国际版 Maps 时，country 丢失不显示未来一小时降水的问题
                                     switch (true) {
                                         case $request.headers["User-Agent"]?.startsWith("WeatherKit_Weather_macOS_Version"):
