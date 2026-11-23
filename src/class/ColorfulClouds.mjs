@@ -483,23 +483,18 @@ export default class ColorfulClouds {
         if (begin) request.url += `&begin=${begin}`;
         try {
             const fetchHourly = () => fetch(request).then(response => JSON.parse(response?.body ?? "{}"));
-            let body;
-            if (begin === undefined) {
-                body = await this.#FetchJsonWithEdgeCache(
-                    this.#BuildCacheKey("hourly", `steps=${hourlysteps}`, 2),
-                    300,
-                    fetchHourly,
-                    "hourly",
-                );
-            } else {
-                const beginHour = Math.floor(Number(begin) / 3600) * 3600;
-                body = await this.#FetchJsonWithEdgeCache(
-                    this.#BuildCacheKey("hourly", `steps=${hourlysteps}&begin=${beginHour}`, 2),
-                    1800,
-                    fetchHourly,
-                    "hourly",
-                );
-            }
+            const hasBegin = begin !== undefined && begin !== null && Number.isFinite(Number(begin));
+            const beginHour = hasBegin ? Math.floor(Number(begin) / 3600) * 3600 : undefined;
+            const extraQuery = beginHour !== undefined ? `steps=${hourlysteps}&begin=${beginHour}` : `steps=${hourlysteps}`;
+            const isYesterdayQuery = hasBegin && Number(hourlysteps) <= 24;
+            const ttlSeconds = isYesterdayQuery ? 1800 : 300;
+            const cacheKey = this.#BuildCacheKey("hourly", extraQuery, 2);
+            const body = await this.#FetchJsonWithEdgeCache(
+                cacheKey,
+                ttlSeconds,
+                fetchHourly,
+                "hourly",
+            );
             switch (body?.status) {
                 case "ok":
                     switch (body?.result?.hourly?.status) {
@@ -536,14 +531,16 @@ export default class ColorfulClouds {
         let forecastDaily;
         try {
             const fetchDaily = () => fetch(request).then(response => JSON.parse(response?.body ?? "{}"));
-            const body = !begin
-                ? await this.#FetchJsonWithEdgeCache(
-                    this.#BuildCacheKey("daily", `steps=${dailysteps}`, 2),
-                    600,
-                    fetchDaily,
-                    "daily",
-                )
-                : await fetchDaily();
+            const hasBegin = begin !== undefined && begin !== null && Number.isFinite(Number(begin));
+            const beginHour = hasBegin ? Math.floor(Number(begin) / 3600) * 3600 : undefined;
+            const extraQuery = beginHour !== undefined ? `steps=${dailysteps}&begin=${beginHour}` : `steps=${dailysteps}`;
+            const cacheKey = this.#BuildCacheKey("daily", extraQuery, 2);
+            const body = await this.#FetchJsonWithEdgeCache(
+                cacheKey,
+                600,
+                fetchDaily,
+                "daily",
+            );
             switch (body?.status) {
                 case "ok":
                     switch (body?.result?.daily?.status) {
