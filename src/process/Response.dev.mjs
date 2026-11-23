@@ -386,7 +386,92 @@ export async function Response($request, $response) {
                                     sanitizeResponseMetadata(body, patch);
                                     adaptWK3ConditionCode(patch);
                                     adaptWK3PrecipitationAmount(patch);
-                                    if (Object.keys(patch).length > 0) rawBody = WeatherKit3.encode(ByteBuffer, patch);
+                                    if (Object.keys(patch).length > 0) {
+                                        rawBody = WeatherKit3.encode(ByteBuffer, patch);
+                                        try {
+                                            const bytes = rawBody instanceof Uint8Array ? rawBody : new Uint8Array(rawBody);
+                                            const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+                                            const root = dv.getUint32(0, true);
+                                            const rootVt = root - dv.getInt32(root, true);
+                                            const rootVtLen = dv.getUint16(rootVt, true);
+                                            const nhOff = 4 + 5 * 2 < rootVtLen ? dv.getUint16(rootVt + 4 + 5 * 2, true) : 0;
+                                            let c0_vt1 = -1;
+                                            let c0_end = null;
+                                            let s0_vt1 = -1;
+                                            let s0_end = null;
+                                            if (nhOff) {
+                                                const nh = root + nhOff + dv.getUint32(root + nhOff, true);
+                                                const nhVt = nh - dv.getInt32(nh, true);
+                                                const nhVtLen = dv.getUint16(nhVt, true);
+                                                const sumVecOff = 4 + 1 * 2 < nhVtLen ? dv.getUint16(nhVt + 4 + 1 * 2, true) : 0;
+                                                const condVecOff = 4 + 2 * 2 < nhVtLen ? dv.getUint16(nhVt + 4 + 2 * 2, true) : 0;
+                                                if (sumVecOff) {
+                                                    const sv = nh + sumVecOff + dv.getUint32(nh + sumVecOff, true);
+                                                    if (dv.getUint32(sv, true) > 0) {
+                                                        const s0 = sv + 4 + dv.getUint32(sv + 4, true);
+                                                        const s0Vt = s0 - dv.getInt32(s0, true);
+                                                        s0_vt1 = 4 + 1 * 2 < dv.getUint16(s0Vt, true) ? dv.getUint16(s0Vt + 6, true) : 0;
+                                                        s0_end = s0_vt1 ? dv.getInt32(s0 + s0_vt1, true) : null;
+                                                    }
+                                                }
+                                                if (condVecOff) {
+                                                    const cv = nh + condVecOff + dv.getUint32(nh + condVecOff, true);
+                                                    if (dv.getUint32(cv, true) > 0) {
+                                                        const c0 = cv + 4 + dv.getUint32(cv + 4, true);
+                                                        const c0Vt = c0 - dv.getInt32(c0, true);
+                                                        c0_vt1 = 4 + 1 * 2 < dv.getUint16(c0Vt, true) ? dv.getUint16(c0Vt + 6, true) : 0;
+                                                        c0_end = c0_vt1 ? dv.getInt32(c0 + c0_vt1, true) : null;
+                                                    }
+                                                }
+                                            }
+                                            const cw = patch.currentWeather ?? body.currentWeather;
+                                            const nhJs = patch.forecastNextHour ?? body.forecastNextHour;
+                                            const mins = nhJs?.minutes ?? [];
+                                            const nz = mins.filter(m => (m?.perceivedPrecipitationIntensity ?? 0) >= 0.1).length;
+                                            Console.warn(
+                                                "[WK3-DIAG]",
+                                                JSON.stringify({
+                                                    lat: url.pathname.split("/")[5],
+                                                    lon: url.pathname.split("/")[6],
+                                                    cw_patched: Boolean(patch.currentWeather),
+                                                    nh_patched: Boolean(patch.forecastNextHour),
+                                                    cw: cw
+                                                        ? {
+                                                              cond: cw.conditionCode,
+                                                              pInt: cw.precipitationIntensity,
+                                                              perc: cw.perceivedPrecipitationIntensity,
+                                                              exp_read: (cw.metadata?.expireTime ?? 0) - (cw.metadata?.readTime ?? 0),
+                                                          }
+                                                        : null,
+                                                    nh_cond: (nhJs?.condition ?? []).map(c => ({
+                                                        tok: c.forecastToken,
+                                                        b: c.beginCondition,
+                                                        e: c.endCondition,
+                                                        st: c.startTime,
+                                                        et: c.endTime,
+                                                    })),
+                                                    nh_sum: (nhJs?.summary ?? []).map(s => ({
+                                                        cond: s.condition,
+                                                        pInt: s.precipitationIntensity,
+                                                        ch: s.precipitationChance,
+                                                        st: s.startTime,
+                                                        et: s.endTime,
+                                                    })),
+                                                    min0: mins[0]
+                                                        ? {
+                                                              pInt: mins[0].precipitationIntensity,
+                                                              perc: mins[0].perceivedPrecipitationIntensity,
+                                                              ch: mins[0].precipitationChance,
+                                                          }
+                                                        : null,
+                                                    nz_cnt: nz,
+                                                    fb_vt: { c0_vt1, c0_end, s0_vt1, s0_end },
+                                                }),
+                                            );
+                                        } catch (e) {
+                                            Console.warn("[WK3-DIAG-ERR]", e?.message ?? String(e));
+                                        }
+                                    }
                                     break;
                                 }
                             }
@@ -496,41 +581,78 @@ export function adaptWK3PrecipitationAmount(patch) {
 }
 
 /**
- * 分钟雷达确认正在下雨、实况却报无雨云况时，把实况天气状况同步为雨。
- * 实况与分钟降水来自两条独立路径：实况取彩云 realtime skycon 分类型，分钟降水取雷达降水强度；
- * 雨势初起时 skycon 仍可能报多云，两者无人对齐，此处仅在“分钟雷达确认此刻正在下雨、实况却报无雨”时兜底，无雨时不干预。
- * 雨强按彩云分钟降水（mm/h）分级：ForecastNextHour mmph 表 LIGHT 下限 0.08；(0, 0.08] 的微量降水用微雨，0.08 以上统一为小雨，
- * 不沿用 ConvertWeatherCode 把 LIGHT_RAIN 降级成微雨的口径。
- * @param {any} currentWeather - 实况天气对象（原地修改 conditionCode）
- * @param {any} forecastNextHour - 未来一小时分钟降水对象
- * @returns {boolean} 是否改写了 conditionCode
+ * 当逐分钟雷达确认当前正在有效降雨时，将无雨实况天况同步为对应雨况，
+ * 并将实况降水强度/体感降水强度向上对齐至首分钟数值，避免 Slot 1 与 Slot 5 跨槽位失步。
+ * @param {any} currentWeather - 当前天气数据对象
+ * @param {any} forecastNextHour - 未来一小时降水数据对象
+ * @returns {boolean} 是否改写了 conditionCode / precipitationIntensity / perceivedPrecipitationIntensity 任一字段
  */
 export function syncCurrentConditionWithNextHour(currentWeather, forecastNextHour) {
     if (!currentWeather || !forecastNextHour) return false;
     const isConditionArray = Array.isArray(currentWeather.conditionCode);
     const currentCondition = isConditionArray ? currentWeather.conditionCode[0] : currentWeather.conditionCode;
-    const noRainConditions = new Set(["CLEAR", "MOSTLY_CLEAR", "PARTLY_CLOUDY", "MOSTLY_CLOUDY", "CLOUDY", "HAZE", "FOGGY", "WINDY"]);
-    if (!noRainConditions.has(currentCondition)) return false;
+    const noRainConditions = new Set([
+        "CLEAR",
+        "MOSTLY_CLEAR",
+        "PARTLY_CLOUDY",
+        "MOSTLY_CLOUDY",
+        "CLOUDY",
+        "HAZE",
+        "FOGGY",
+        "WINDY",
+        "BREEZY",
+    ]);
     const firstMinute = Array.isArray(forecastNextHour.minutes) ? forecastNextHour.minutes[0] : undefined;
     const firstIntensity = Number(firstMinute?.precipitationIntensity);
+    const hasPerceived = typeof firstMinute?.perceivedPrecipitationIntensity === "number" && Number.isFinite(firstMinute.perceivedPrecipitationIntensity);
     const firstSummary = Array.isArray(forecastNextHour.summary) ? forecastNextHour.summary[0] : undefined;
     const summaryConditions = Array.isArray(firstSummary?.condition) ? firstSummary.condition : firstSummary?.condition == null ? [] : [firstSummary.condition];
     const rainSummaryConditions = new Set(["RAIN", "DRIZZLE", "HEAVY_RAIN", "THUNDERSTORMS", "FREEZING_DRIZZLE", "POSSIBLE_DRIZZLE"]);
     const summaryRaining = firstSummary?.clear === false && summaryConditions.some(condition => rainSummaryConditions.has(condition));
-    const rainingNow = (Number.isFinite(firstIntensity) && firstIntensity > 0) || summaryRaining;
+    const rainingNow = hasPerceived
+        ? firstMinute.perceivedPrecipitationIntensity >= 0.1
+        : (Number.isFinite(firstIntensity) && firstIntensity > 0) || summaryRaining;
     if (!rainingNow) return false;
-    let nextCondition;
-    if (Number.isFinite(firstIntensity) && firstIntensity > 0) {
-        nextCondition = firstIntensity > 0.08 ? "RAIN" : "DRIZZLE";
-    } else if (firstSummary?.maxCondition === "DRIZZLE" || firstSummary?.maxCondition === "POSSIBLE_DRIZZLE") {
-        nextCondition = "DRIZZLE";
-    } else {
-        nextCondition = "RAIN";
+
+    let changed = false;
+
+    if (noRainConditions.has(currentCondition)) {
+        let nextCondition;
+        if (typeof firstMinute?.condition === "string" && firstMinute.condition && firstMinute.condition !== "CLEAR") {
+            nextCondition = firstMinute.condition;
+        } else if (Number.isFinite(firstIntensity) && firstIntensity > 0) {
+            nextCondition = firstIntensity > 0.08 ? "RAIN" : "DRIZZLE";
+        } else if (firstSummary?.maxCondition === "DRIZZLE" || firstSummary?.maxCondition === "POSSIBLE_DRIZZLE") {
+            nextCondition = "DRIZZLE";
+        } else {
+            nextCondition = "RAIN";
+        }
+        if (nextCondition !== currentCondition) {
+            Console.info("syncCurrentConditionWithNextHour", `conditionCode: ${currentWeather.conditionCode} -> ${nextCondition}`, `firstMinuteIntensity: ${firstIntensity}`);
+            currentWeather.conditionCode = isConditionArray ? [nextCondition] : nextCondition;
+            changed = true;
+        }
     }
-    if (nextCondition === currentCondition) return false;
-    Console.info("syncCurrentConditionWithNextHour", `conditionCode: ${currentWeather.conditionCode} -> ${nextCondition}`, `firstMinuteIntensity: ${firstIntensity}`);
-    currentWeather.conditionCode = isConditionArray ? [nextCondition] : nextCondition;
-    return true;
+
+    if (hasPerceived && firstMinute.perceivedPrecipitationIntensity >= 0.1) {
+        if (
+            Number.isFinite(firstIntensity) &&
+            (!(typeof currentWeather.precipitationIntensity === "number" && Number.isFinite(currentWeather.precipitationIntensity)) ||
+                currentWeather.precipitationIntensity < firstIntensity)
+        ) {
+            currentWeather.precipitationIntensity = firstIntensity;
+            changed = true;
+        }
+        if (
+            !(typeof currentWeather.perceivedPrecipitationIntensity === "number" && Number.isFinite(currentWeather.perceivedPrecipitationIntensity)) ||
+            currentWeather.perceivedPrecipitationIntensity < firstMinute.perceivedPrecipitationIntensity
+        ) {
+            currentWeather.perceivedPrecipitationIntensity = firstMinute.perceivedPrecipitationIntensity;
+            changed = true;
+        }
+    }
+
+    return changed;
 }
 
 

@@ -116,3 +116,21 @@ test("adaptWK3PrecipitationAmount backfills a scalar number into the WK3 object 
     assert.doesNotThrow(() => adaptWK3PrecipitationAmount(undefined));
     assert.doesNotThrow(() => adaptWK3PrecipitationAmount({ forecastHourly: {} }));
 });
+
+test("syncCurrentConditionWithNextHour syncs intensities upward when already DRIZZLE but weaker than the first minute", () => {
+    const currentWeather = { conditionCode: "DRIZZLE", precipitationIntensity: 0.0069, perceivedPrecipitationIntensity: 0 };
+    const forecastNextHour = { minutes: [{ condition: "DRIZZLE", precipitationIntensity: 0.25, perceivedPrecipitationIntensity: 0.606 }] };
+    assert.equal(syncCurrentConditionWithNextHour(currentWeather, forecastNextHour), true);
+    assert.equal(currentWeather.conditionCode, "DRIZZLE");
+    assert.equal(currentWeather.precipitationIntensity, 0.25);
+    assert.equal(currentWeather.perceivedPrecipitationIntensity, 0.606);
+});
+
+test("syncCurrentConditionWithNextHour does nothing when perceivedPrecipitationIntensity is below 0.1", () => {
+    const currentWeather = { conditionCode: ["CLOUDY"], precipitationIntensity: 0, perceivedPrecipitationIntensity: 0 };
+    const forecastNextHour = { minutes: [{ condition: "POSSIBLE_DRIZZLE", precipitationIntensity: 0.02, perceivedPrecipitationIntensity: 0.05 }] };
+    assert.equal(syncCurrentConditionWithNextHour(currentWeather, forecastNextHour), false);
+    assert.deepEqual(currentWeather.conditionCode, ["CLOUDY"]);
+    assert.equal(currentWeather.precipitationIntensity, 0);
+    assert.equal(currentWeather.perceivedPrecipitationIntensity, 0);
+});
