@@ -130,7 +130,7 @@ test("unselected products and unknown roots pass through byte-identical", async 
 
 test("EAQI's unsupported CO sub-index does not roll back the whole AQ product", async t => {
     globalThis.$argument.DataSets = "airQuality,currentWeather";
-    globalThis.$argument.AirQuality = { Calculate: { Algorithm: "EU_EAQI" }, Comparison: { ReplaceWhenCurrentChange: false } };
+    globalThis.$argument.AirQuality = { Current: { Index: { Provider: "Calculate" } }, Calculate: { Algorithm: "EU_EAQI" }, Comparison: { ReplaceWhenCurrentChange: false } };
     t.mock.method(ColorfulClouds.prototype, "CurrentWeather", async () => undefined);
     // Minimal synthetic copy of the native response shape that exposed the -1 sentinel regression.
     // 官方 pollutant 仅含 amount/units/pollutantType；单项 index/categoryIndex 是内部分析字段，原样透传，App 不读取。

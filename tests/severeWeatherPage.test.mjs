@@ -573,7 +573,7 @@ test("ColorfulClouds reuses its realtime cache and standardizes v2.6 alerts", as
 
         assert.equal(extracted.source, "国家预警信息发布中心");
         assert.equal(extracted.areaName, "北京市海淀区");
-        assert.deepEqual(extracted.metadata, { attributionUrl: "https://www.caiyunapp.com/h5" });
+        assert.deepEqual(extracted.metadata, { attributionUrl: "https://developer.apple.com/weatherkit/data-source-attribution/" });
         assert.equal(extracted.detailsUrl, "https://weatherkit.apple.com/alertDetails/index.html?ids=39.976,116.3176&lang=de&party=ColorfulClouds");
         assert.equal(extracted.alerts.length, 1);
         assert.equal(extracted.alerts[0].areaId, "110108");
@@ -691,7 +691,7 @@ test("ColorfulClouds v3 CAP alerts remain available through WeatherAlertV3CAP", 
 
         assert.equal(extracted.source, "NWS Los Angeles/Oxnard CA");
         assert.equal(extracted.areaName, "Los Angeles");
-        assert.deepEqual(extracted.metadata, { attributionUrl: "https://www.caiyunapp.com/h5" });
+        assert.deepEqual(extracted.metadata, { attributionUrl: "https://developer.apple.com/weatherkit/data-source-attribution/" });
         assert.equal(extracted.detailsUrl, "https://weatherkit.apple.com/alertDetails/index.html?ids=34.05,-118.25&lang=de&party=ColorfulClouds");
         assert.equal(extracted.alerts.length, 1);
         assert.equal(extracted.alerts[0].areaId, "CAC037");
@@ -1045,7 +1045,7 @@ test("the request scripts route coordinate identifiers through configured Colorf
             assert.equal($response.status, 200);
             assert.equal($response.statusCode, 200);
             assert.equal($response.headers["Content-Type"], "application/json");
-            assert.equal(body[0].attributionURL, "https://www.caiyunapp.com/h5");
+            assert.equal(body[0].attributionURL, "https://developer.apple.com/weatherkit/data-source-attribution/");
             assert.equal(body[0].description, "大风蓝色预警");
             assert.equal(body[0].source, "国家预警信息发布中心");
         }

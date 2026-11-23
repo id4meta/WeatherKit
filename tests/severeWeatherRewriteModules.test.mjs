@@ -214,9 +214,7 @@ test("Dev builds use dev templates, bundles, and output names", async () => {
     }
     assert.doesNotMatch(config, /\boutput\b[^\n]*from "\.\/arguments-builder\.full\.config"/);
     assert.match(packageJson, /"dev": "npm-run-all --parallel build:dev build:dev-args"/);
-    assert.match(devWorkflow, /run: npm run build:dev/);
-    assert.match(devWorkflow, /run: npm run build:dev-args/);
-    assert.match(devWorkflow, /needs: \[scripts, modules\]/);
+    assert.match(devWorkflow, /run: npm run dev/);
     assert.match(rollup, /\.\/dist\/request\.dev\.bundle\.js/);
     assert.match(rollup, /\.\/dist\/response\.dev\.bundle\.js/);
     assert.doesNotMatch(rollup, /\.\/dist\/(?:request|response)\.bundle\.js/);

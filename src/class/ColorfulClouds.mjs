@@ -289,7 +289,16 @@ export default class ColorfulClouds {
                                 temporarilyUnavailable: false,
                                 sourceType: "MODELED",
                             };
-                            body.result.minutely.probability = body.result.minutely.probability.map(probability => Math.round(probability * 100));
+                            // 彩云 v2.6 minutely.probability 实测同时存在 0–1 小数（如 0.99）与 0–100 整数（如 10）两种口径：
+                            // 数组内若存在 > 1 的值则按 0–100 百分比直取，否则按 0–1 小数乘 100，并统一钳制在 [0, 100] 防 FlatBuffer uint8 溢出。
+                            const rawProbability = Array.isArray(body?.result?.minutely?.probability) ? body.result.minutely.probability : [];
+                            const isPercentScale = rawProbability.some(probability => Number(probability) > 1);
+                            body.result.minutely.probability = rawProbability.map(probability => {
+                                const value = Number(probability);
+                                if (!Number.isFinite(value) || value <= 0) return 0;
+                                const normalized = isPercentScale ? value : value * 100;
+                                return Math.min(100, Math.max(0, Math.round(normalized)));
+                            });
                             let minuteStemp = new Date(body?.server_time * 1000).setSeconds(0, 0);
                             minuteStemp = minuteStemp.valueOf() / 1000 - 60;
                             forecastNextHour = {

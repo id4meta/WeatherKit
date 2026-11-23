@@ -45,14 +45,14 @@ export default class ForecastNextHour {
             晴朗: "CLEAR",
             雨夹雪: "SLEET",
             rain: "RAIN",
-            precipitation: "RAIN",
             雨: "RAIN",
-            // 通用“降水”描述无雨/雪/冰雹关键词时兜底为 RAIN，不回退为 CLEAR
-            //（分钟数组里有有效降水时 Minute() 另有守卫，见下）。
-            降水: "RAIN",
             snow: "SNOW",
             雪: "SNOW",
             冰雹: "HAIL",
+            // 通用“降水”描述无雨/雪/冰雹关键词时兜底为 RAIN，不回退为 CLEAR
+            //（分钟数组里有有效降水时 Minute() 另有守卫，见下）。
+            precipitation: "RAIN",
+            降水: "RAIN",
         },
         Precipitation: {
             Level: {
