@@ -312,7 +312,7 @@ export async function Response($request, $response) {
                                     const replaceWeather = async (name, inject) => {
                                         const original = body[name];
                                         try {
-                                            const copy = original ? JSON.parse(JSON.stringify(original)) : undefined;
+                                            const copy = original ? structuredClone(original) : undefined;
                                             const result = await inject(copy, Settings, enviroments);
                                             if (result?.metadata && result.metadata.temporarilyUnavailable !== true && JSON.stringify(result) !== JSON.stringify(original)) patch[name] = result;
                                         } catch (error) {
