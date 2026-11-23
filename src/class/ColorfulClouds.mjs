@@ -4,6 +4,12 @@ import AirQuality from "./AirQuality.mjs";
 import ForecastNextHour from "./ForecastNextHour.mjs";
 import Weather from "./Weather.mjs";
 
+const scaleFinite = (value, factor = 1, round = false) => {
+    if (!Number.isFinite(value)) return undefined;
+    const scaled = value * factor;
+    return round ? Math.round(scaled) : scaled;
+};
+
 export default class ColorfulClouds {
     constructor(parameters, token) {
         this.Name = "ColorfulClouds";
@@ -136,7 +142,7 @@ export default class ColorfulClouds {
             Minutely: [
                 "CN",
             ],
-            AirQuality: ["CN"],
+            AirQuality: ["CN", "HK", "MO"],
         },
     };
 
@@ -570,8 +576,8 @@ export default class ColorfulClouds {
                                     forecastStart: timeStamp,
                                     forecastEnd: timeStamp + 24 * 3600, // 24 hours
                                     ...Weather.ConvertWeatherCodeField(body?.result?.daily?.skycon?.[i]?.value),
-                                    humidityMax: Math.round(body?.result?.daily?.humidity?.[i]?.max * 100),
-                                    humidityMin: Math.round(body?.result?.daily?.humidity?.[i]?.min * 100),
+                                    humidityMax: scaleFinite(body?.result?.daily?.humidity?.[i]?.max, 100, true),
+                                    humidityMin: scaleFinite(body?.result?.daily?.humidity?.[i]?.min, 100, true),
                                     // maxUvIndex: Weather.ConvertDSWRF(body?.result?.daily?.dswrf?.[i]?.max), // ConvertDSWRF 转换不准确
                                     // moonPhase: "", // Not given
                                     // moonrise: body?.result?.daily?.astro?.[i].sunset.time, // Not given
@@ -596,8 +602,8 @@ export default class ColorfulClouds {
                                     // temperatureMaxTime: 0, // Not given
                                     temperatureMin: body?.result?.daily?.temperature?.[i]?.min,
                                     // temperatureMinTime: 0, // Not given
-                                    visibilityMax: body?.result?.daily?.visibility?.[i]?.max * 1000,
-                                    visibilityMin: body?.result?.daily?.visibility?.[i]?.min * 1000,
+                                    visibilityMax: scaleFinite(body?.result?.daily?.visibility?.[i]?.max, 1000),
+                                    visibilityMin: scaleFinite(body?.result?.daily?.visibility?.[i]?.min, 1000),
                                     // windGustSpeedMax: 0, // Not given
                                     windSpeedAvg: body?.result?.daily?.wind?.[i]?.avg?.speed,
                                     windSpeedMax: body?.result?.daily?.wind?.[i]?.max?.speed,
@@ -949,20 +955,20 @@ export default class ColorfulClouds {
         return {
             metadata: this.#Metadata(hourly.result.server_time, hourly.location),
             hours: Array.from({ length: hourly.result.hourly.skycon.length }, (_, i) => ({
-                cloudCover: Math.round(hourly.result.hourly.cloudrate[i]?.value * 100),
+                cloudCover: scaleFinite(hourly.result.hourly.cloudrate?.[i]?.value, 100, true),
                 // cloudCoverHighAltPct: 0, // Not given
                 // cloudCoverLowAltPct: 0, // Not given
                 // cloudCoverMidAltPct: 0, // Not given
                 ...Weather.ConvertWeatherCodeField(hourly.result.hourly.skycon[i].value),
                 // daylight: false, // Not given
                 forecastStart: (new Date(hourly.result.hourly.skycon[i].datetime).getTime() / 1000) | 0,
-                humidity: Math.round(hourly.result.hourly.humidity[i]?.value * 100),
+                humidity: scaleFinite(hourly.result.hourly.humidity?.[i]?.value, 100, true),
                 // perceivedPrecipitationIntensity: "", // Not given
                 precipitationAmount: hourly.result.hourly.precipitation[i]?.value,
                 precipitationChance: this.#NormalizeProbability(hourly.result.hourly.precipitation[i]?.probability, isHourlyProbPercent),
                 // precipitationIntensity: 0, // Not given
                 // precipitationType: "", // Not given
-                pressure: hourly.result.hourly.pressure[i]?.value / 100,
+                pressure: scaleFinite(hourly.result.hourly.pressure?.[i]?.value, 0.01),
                 // pressureTrend: "", // Not given
                 // snowfallAmount: 0, // Not given
                 // snowfallIntensity: 0, // Not given
@@ -970,7 +976,7 @@ export default class ColorfulClouds {
                 temperatureApparent: hourly.result.hourly.apparent_temperature[i]?.value,
                 // temperatureDewPoint: 0, // Not given
                 // uvIndex: 0, // Not given
-                visibility: hourly.result.hourly.visibility[i]?.value * 1000,
+                visibility: scaleFinite(hourly.result.hourly.visibility?.[i]?.value, 1000),
                 windDirection: this.#RoundUInt(hourly.result.hourly.wind[i]?.direction, 0, 360),
                 // windGust: 0, // Not given
                 windSpeed: hourly.result.hourly.wind[i]?.speed,

@@ -435,3 +435,19 @@ test("PrecipitationType ignores a negated snow phrase when light rain follows", 
 test("PrecipitationType strips a negated rain phrase before matching snow", () => {
     assert.equal(ForecastNextHour.PrecipitationType("未来两小时不会下雨，但有小雪"), "SNOW");
 });
+
+test("PrecipitationType returns CLEAR for a negated precipitation phrase without a rain or snow keyword", () => {
+    assert.equal(ForecastNextHour.PrecipitationType("未来两小时无降水"), "CLEAR");
+});
+
+test("PrecipitationType returns CLEAR for a negated future precipitation phrase", () => {
+    assert.equal(ForecastNextHour.PrecipitationType("未来两小时不会有降水"), "CLEAR");
+});
+
+test("PrecipitationType returns CLEAR for a negated snow phrase using 没有", () => {
+    assert.equal(ForecastNextHour.PrecipitationType("未来两小时没有降雪"), "CLEAR");
+});
+
+test("PrecipitationType returns RAIN for a positive precipitation phrase", () => {
+    assert.equal(ForecastNextHour.PrecipitationType("未来一小时有降水"), "RAIN");
+});

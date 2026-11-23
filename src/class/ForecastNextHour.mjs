@@ -123,7 +123,7 @@ export default class ForecastNextHour {
     // 根据描述文本猜测降水类型
     static PrecipitationType(sentence) {
         Console.info("☑️ PrecipitationType", `sentence: ${sentence}`);
-        const normalizedSentence = String(sentence ?? "").replace(/不会下[雨雪冰雹]+|无[降]?[雨雪冰雹]+/g, "");
+        const normalizedSentence = String(sentence ?? "").replace(/(?:不会(?:下|有)|无|没有)降?[雨雪水冰雹]+/g, "");
         const precipitationType = Object.entries(ForecastNextHour.#Configs.PrecipitationType).find(([key]) => normalizedSentence.includes(key))?.[1] ?? "CLEAR";
         Console.info(`✅ PrecipitationType: ${precipitationType}`);
         return precipitationType;

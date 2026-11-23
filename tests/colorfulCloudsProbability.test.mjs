@@ -86,7 +86,62 @@ test("Minutely skips HK, MO, TW, UA and PL without fetching", async () => {
     }
 });
 
-test("CurrentAirQuality skips HK and MO without fetching", async () => {
+function realtimeAirQualityResponse() {
+    return {
+        status: "ok",
+        location: [114.06, 22.54],
+        result: {
+            server_time: 1795415760,
+            location: [114.06, 22.54],
+            realtime: {
+                status: "ok",
+                cloudrate: 0.5,
+                skycon: "CLEAR_DAY",
+                humidity: 0.8,
+                pressure: 100000,
+                temperature: 20,
+                apparent_temperature: 19,
+                visibility: 10,
+                wind: { direction: 90, speed: 3 },
+                precipitation: { local: { intensity: 0 } },
+                air_quality: {
+                    obs_time: "2026-11-24T08:00:00+08:00",
+                    description: { usa: "Moderate", chn: "良" },
+                    aqi: { usa: 87, chn: 60 },
+                    pm25: 30,
+                    pm10: 40,
+                    o3: 50,
+                    no2: 20,
+                    so2: 5,
+                    co: 0.5,
+                },
+            },
+            alert: { status: "ok", content: [] },
+        },
+    };
+}
+
+test("CurrentAirQuality uses Caiyun for HK and MO", async () => {
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+        fetchCalls++;
+        return new Response(JSON.stringify(realtimeAirQualityResponse()));
+    };
+    try {
+        for (const country of ["HK", "MO"]) {
+            const colorfulClouds = new ColorfulClouds({ country, language: "zh-CN", latitude: "22.54", longitude: "114.06" }, "test-token");
+            const result = await colorfulClouds.CurrentAirQuality();
+            assert.equal(result.index, 87);
+            assert.equal(result.metadata.temporarilyUnavailable, false);
+        }
+        assert.equal(fetchCalls, 2);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test("CurrentAirQuality skips TW and undefined country without fetching", async () => {
     const originalFetch = globalThis.fetch;
     let fetchCalls = 0;
     globalThis.fetch = async () => {
@@ -94,7 +149,7 @@ test("CurrentAirQuality skips HK and MO without fetching", async () => {
         throw new Error("fetch must not be called for unsupported AirQuality countries");
     };
     try {
-        for (const country of ["HK", "MO"]) {
+        for (const country of ["TW", undefined]) {
             const colorfulClouds = new ColorfulClouds({ country, language: "zh-CN", latitude: "22.54", longitude: "114.06" }, "test-token");
             const result = await colorfulClouds.CurrentAirQuality();
             assert.equal(result.metadata.temporarilyUnavailable, true);
@@ -196,6 +251,45 @@ test("Daily(12) stops at the 2 returned skycon days without NaN", async () => {
         const result = await colorfulClouds.Daily(12);
         assert.equal(result.days.length, 2);
         assertNoNaN(result.days);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test("Daily returns undefined for missing humidity/visibility entries without NaN", async () => {
+    const originalFetch = globalThis.fetch;
+    const body = dailyResponse();
+    body.result.daily.humidity = body.result.daily.humidity.slice(0, 1);
+    body.result.daily.visibility = body.result.daily.visibility.slice(0, 1);
+    globalThis.fetch = async () => new Response(JSON.stringify(body));
+    try {
+        const colorfulClouds = new ColorfulClouds({ country: "CN", language: "zh-CN", latitude: "22.54", longitude: "114.06" }, "test-token");
+        const result = await colorfulClouds.Daily(12);
+        assert.equal(result.days.length, 2);
+        assert.equal(result.days[1].humidityMax, undefined);
+        assert.equal(result.days[1].humidityMin, undefined);
+        assert.equal(result.days[1].visibilityMax, undefined);
+        assert.equal(result.days[1].visibilityMin, undefined);
+        assertNoNaN(result.days);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+test("ForecastHourly returns undefined for missing cloudrate/humidity/pressure/visibility entries without NaN", async () => {
+    const originalFetch = globalThis.fetch;
+    const body = hourlyResponse([10, 20]);
+    for (const key of ["cloudrate", "humidity", "pressure", "visibility"]) body.result.hourly[key] = body.result.hourly[key].slice(0, 1);
+    globalThis.fetch = async () => new Response(JSON.stringify(body));
+    try {
+        const colorfulClouds = new ColorfulClouds({ country: "CN", language: "zh-CN", latitude: "22.54", longitude: "114.06" }, "test-token");
+        const result = await colorfulClouds.ForecastHourly(2);
+        assert.equal(result.hours.length, 2);
+        assert.equal(result.hours[1].cloudCover, undefined);
+        assert.equal(result.hours[1].humidity, undefined);
+        assert.equal(result.hours[1].pressure, undefined);
+        assert.equal(result.hours[1].visibility, undefined);
+        assertNoNaN(result.hours);
     } finally {
         globalThis.fetch = originalFetch;
     }

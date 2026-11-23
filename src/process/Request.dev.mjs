@@ -119,11 +119,13 @@ export async function Request($request) {
                                     // 国行设备发出的港澳台请求带 country=CN：发往苹果上游前改写为 HK/MO/TW，
                                     // 由上游直接返回港澳台原厂 AQI（第 40 轮）。
                                     const resolvedCountry = resolveCountryForResponse(url, parameters);
+                                    const currentCountry = url.searchParams.get("country")?.toUpperCase();
                                     if (resolvedCountry === "HK" || resolvedCountry === "MO" || resolvedCountry === "TW") {
-                                        const currentCountry = url.searchParams.get("country")?.toUpperCase();
                                         if (!currentCountry || currentCountry === "CN") {
                                             url.searchParams.set("country", resolvedCountry);
                                         }
+                                    } else if (resolvedCountry === undefined && currentCountry === "CN") {
+                                        url.searchParams.delete("country");
                                     }
                                     // 解决 macOS 天气 app 如果使用国际版 Maps 时，country 丢失不显示未来一小时降水的问题
                                     switch (true) {

@@ -243,3 +243,26 @@ test("Request keeps country=CN for domestic coordinates", async () => {
     assert.equal(await requestCountry(RequestDev, "24.479", "118.089"), "CN");
     assert.equal(await requestCountry(RequestProd, "24.479", "118.089"), "CN");
 });
+
+// 远洋坐标带 country=CN 走 Request()：坐标解析为 undefined 时删除 country 参数（第 42 轮）；
+///api/v2/weather/ 与 /api/v3/weather/ 分支不发真实网络请求，只改写 $request.url 后返回。
+const requestUrl = async (Request, latitude, longitude) => {
+    const $request = {
+        method: "GET",
+        url: `https://weatherkit.apple.com/api/v3/weather/zh-Hans-CN/${latitude}/${longitude}?country=CN&dataSets=currentWeather,forecastDaily,forecastHourly,weatherAlerts`,
+        headers: { "User-Agent": "WeatherKit_Weather_iOS_Version 27.3 (Build 24C5049f)" },
+    };
+    const { $request: rewritten } = await Request($request);
+    return rewritten.url;
+};
+
+test("Request drops country=CN for open-ocean coordinates while keeping HK/MO/TW rewrites and CN", async () => {
+    for (const Request of [RequestDev, RequestProd]) {
+        const oceanUrl = new URL(await requestUrl(Request, "20.0", "140.0"));
+        assert.equal(oceanUrl.searchParams.has("country"), false);
+        assert.equal(new URL(await requestUrl(Request, "22.429", "114.077")).searchParams.get("country"), "HK");
+        assert.equal(new URL(await requestUrl(Request, "22.202", "113.548")).searchParams.get("country"), "MO");
+        assert.equal(new URL(await requestUrl(Request, "24.947", "121.328")).searchParams.get("country"), "TW");
+        assert.equal(new URL(await requestUrl(Request, "22.522", "114.059")).searchParams.get("country"), "CN");
+    }
+});

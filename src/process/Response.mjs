@@ -110,6 +110,7 @@ export async function Response($request, $response) {
                                         const original = body[name];
                                         try {
                                             const result = await inject(original === undefined ? undefined : JSON.parse(JSON.stringify(original)));
+                                            if (!result || result === original) return;
                                             if (result?.metadata && result.metadata.temporarilyUnavailable !== true) {
                                                 body[name] = result;
                                                 changed = true;
@@ -292,7 +293,10 @@ export async function Response($request, $response) {
                                     // 解码选中的可注入产品（注入用）与仅做归属清理的非注入产品（兜底清理用）；
                                     // 其余根产品保持原始 arena；解码失败的产品保留原始 arena，不参与注入与重写。
                                     const dataSets = parameters.dataSets.filter(dataSet => Settings.DataSets.includes(dataSet) && ["airQuality", "currentWeather", "forecastDaily", "forecastHourly", "forecastNextHour", "weatherAlerts"].includes(dataSet));
-                                    const sweepDataSets = parameters.dataSets.filter(dataSet => ["dataNotice", "forecastPeriodic", "historicalComparisons", "weatherChanges", "news"].includes(dataSet));
+                                    const sweepDataSets =
+                                        parameters.country === "CN"
+                                            ? parameters.dataSets.filter(dataSet => ["dataNotice", "forecastPeriodic", "historicalComparisons", "weatherChanges", "news"].includes(dataSet))
+                                            : [];
                                     if (dataSets.length === 0 && sweepDataSets.length === 0) break;
                                     const rootNames = [...dataSets, ...sweepDataSets].map(dataSet => Configs.DataSets[dataSet] ?? dataSet);
                                     const { json, failures } = WeatherKit3.decodeWithReport(ByteBuffer, rootNames);
@@ -317,6 +321,7 @@ export async function Response($request, $response) {
                                         try {
                                             const copy = name === "weatherAlerts" ? (original ? structuredClone(original) : undefined) : original;
                                             const result = await inject(copy, Settings, enviroments);
+                                            if (!result || result === original) return;
                                             if (result?.metadata && result.metadata.temporarilyUnavailable !== true) {
                                                 const metadataChanged =
                                                     !original ||
