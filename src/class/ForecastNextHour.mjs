@@ -1,6 +1,21 @@
 import { Console } from "@nsnanocat/util";
 import { WK2 } from "@nsringo/weatherkit";
 
+// 真实 WK2 schema（生产 @nsringo/weatherkit，第 15 轮记录）不含
+// FLURRIES / POSSIBLE_FLURRIES / HAIL / POSSIBLE_HAIL；Minute() 在
+// 轻雪/冰雹时仍会产出这些值。Condition() 末尾的 safeConditions 过滤
+// 按 WK2.ConditionType 校验，末段 maxCondition 落在其中时，引用它的
+// 全部 Condition 会被滤空（Summary 不受影响，造成 Summary 3 段、
+// Condition vec(0)）。本地桩的 WK2 表比真实包丰富（含上述 4 项），
+// 故此处按固定映射降级，不依赖导入的 WK2 表：
+// FLURRIES / POSSIBLE_FLURRIES → SNOW；HAIL → SLEET；POSSIBLE_HAIL → POSSIBLE_SLEET。
+const WK2_CONDITION_FALLBACK = {
+    FLURRIES: "SNOW",
+    POSSIBLE_FLURRIES: "SNOW",
+    HAIL: "SLEET",
+    POSSIBLE_HAIL: "POSSIBLE_SLEET",
+};
+
 export default class ForecastNextHour {
     Name = "ForecastNextHour";
     Version = "v1.6.5";
@@ -347,7 +362,14 @@ export default class ForecastNextHour {
             }
         }
         // pinned WK2 schema 不认识的值会被 FlatBuffer 当成 0（CLEAR），因此整条条件必须跳过。
-        const safeConditions = Conditions.filter(condition => {
+        // 先把真实 WK2 表没有的 Minute() 产出值按固定映射降级（见文件顶部 WK2_CONDITION_FALLBACK），
+        // 再做过滤：否则末段 maxCondition 为 FLURRIES/HAIL 时，引用它的全部 Condition 会被滤空。
+        const normalizedConditions = Conditions.map(condition => ({
+            ...condition,
+            beginCondition: WK2_CONDITION_FALLBACK[condition.beginCondition] ?? condition.beginCondition,
+            endCondition: WK2_CONDITION_FALLBACK[condition.endCondition] ?? condition.endCondition,
+        }));
+        const safeConditions = normalizedConditions.filter(condition => {
             const supported = [condition.beginCondition, condition.endCondition].every(value => typeof WK2.ConditionType[value] === "number");
             if (!supported) Console.warn("Condition", `Unsupported ConditionType: ${condition.beginCondition}/${condition.endCondition}`);
             return supported;

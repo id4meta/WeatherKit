@@ -153,4 +153,22 @@ test("resolveCountryForResponse infers CN/HK from domestic coordinates when coun
 
     const stLawrence = new URL("https://weatherkit.apple.com/api/v3/weather/zh-Hans-CN/48.0/-62.0");
     assert.equal(resolveCountryForResponse(stLawrence, { country: "CN", latitude: "48.0", longitude: "-62.0" }), undefined);
+
+    const taipei = new URL("https://weatherkit.apple.com/api/v3/weather/zh-Hans-CN/25.033/121.565?country=CN");
+    assert.equal(resolveCountryForResponse(taipei, { country: "CN", latitude: "25.033", longitude: "121.565" }), "TW");
+
+    const centralTaiwan = new URL("https://weatherkit.apple.com/api/v3/weather/zh-Hans-CN/23.188/120.924?country=CN");
+    assert.equal(resolveCountryForResponse(centralTaiwan, { country: "CN", latitude: "23.188", longitude: "120.924" }), "TW");
+
+    const hongKong = new URL("https://weatherkit.apple.com/api/v3/weather/zh-Hans-CN/22.319/114.169?country=CN");
+    assert.equal(resolveCountryForResponse(hongKong, { country: "CN", latitude: "22.319", longitude: "114.169" }), "HK");
+
+    const macau = new URL("https://weatherkit.apple.com/api/v3/weather/zh-Hans-CN/22.198/113.543?country=CN");
+    assert.equal(resolveCountryForResponse(macau, { country: "CN", latitude: "22.198", longitude: "113.543" }), "MO");
+
+    const shenzhenCN = new URL("https://weatherkit.apple.com/api/v3/weather/zh-Hans-CN/22.543/114.058?country=CN");
+    assert.equal(resolveCountryForResponse(shenzhenCN, { country: "CN", latitude: "22.543", longitude: "114.058" }), "CN");
+
+    const xiamenCN = new URL("https://weatherkit.apple.com/api/v3/weather/zh-Hans-CN/24.479/118.089?country=CN");
+    assert.equal(resolveCountryForResponse(xiamenCN, { country: "CN", latitude: "24.479", longitude: "118.089" }), "CN");
 });

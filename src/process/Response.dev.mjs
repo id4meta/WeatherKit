@@ -564,20 +564,22 @@ export function syncCurrentConditionWithNextHour(currentWeather, forecastNextHou
 /**
  * 当请求 URL 缺失 country 查询参数（如美区设置下的小组件请求）时，
  * 按国内经纬度兜底推断国家代码，避免将国内坐标误判为国外（Issue #100）。
- * 显式传入 country 参数时始终以显式参数优先。
+ * 显式传入的非 CN 国家码（如 country=US、country=JP）始终原样返回；
+ * 显式传入 country=CN（国行设备）时仍先按收紧矩形判定港澳台，
+ * 大陆矩形内保持 CN，大陆矩形外（海域）返回 undefined（第 36 轮海洋守卫）。
  * @param {URL} url - 请求 URL 对象
  * @param {{ country?: string, latitude?: string | number, longitude?: string | number }} parameters - parseWeatherKitURL 解析结果
  * @returns {string | undefined}
  */
 export function resolveCountryForResponse(url, parameters) {
     const explicitCountry = url?.searchParams?.get("country")?.toUpperCase();
-    if (explicitCountry) return explicitCountry;
+    if (explicitCountry && explicitCountry !== "CN") return explicitCountry;
     const lat = Number(parameters?.latitude);
     const lon = Number(parameters?.longitude);
     if (Number.isFinite(lat) && Number.isFinite(lon)) {
-        if (lat >= 22.13 && lat <= 22.50 && lon >= 113.82 && lon <= 114.41) return "HK";
-        if (lat >= 22.09 && lat <= 22.25 && lon >= 113.52 && lon <= 113.65) return "MO";
-        if (lat >= 21.7 && lat <= 25.4 && lon >= 119.3 && lon <= 122.1) return "TW";
+        if (lat >= 22.15 && lat <= 22.50 && lon >= 113.83 && lon <= 114.44) return "HK";
+        if (lat >= 22.09 && lat <= 22.21 && lon >= 113.52 && lon <= 113.60) return "MO";
+        if (lat >= 21.85 && lat <= 25.35 && lon >= 119.95 && lon <= 122.05) return "TW";
         if (lat >= 18 && lat <= 54 && lon >= 73 && lon <= 135) return "CN";
         if (parameters?.country === "CN") return undefined;
     }
@@ -828,6 +830,12 @@ async function InjectAirQuality(airQuality, Settings, Caches, enviroments) {
     const isPollutantEmpty = !Array.isArray(airQuality?.pollutants) || airQuality.pollutants.length === 0;
     const injectedPollutants = isPollutantEmpty ? await InjectPollutants(Settings, enviroments) : airQuality;
     const needPollutants = isPollutantEmpty && !!(injectedPollutants?.metadata && !injectedPollutants.metadata.temporarilyUnavailable);
+
+    // 海域/空 AQ 短路：原始苹果 airQuality 缺失且彩云未成功注入污染物时，
+    // 直接原样返回，跳过 InjectIndex、InjectComparison 与对象拼接。
+    if (!airQuality?.metadata && !needPollutants) {
+        return airQuality;
+    }
 
     // Step3. 根据污染物补齐情况与替换配置，决定是否注入 AQI 指数
     const needInjectIndex = needPollutants || Settings?.AirQuality?.Current?.Index?.Replace?.some(scaleName => AirQuality.ScaleMatches(airQuality?.scale, scaleName));

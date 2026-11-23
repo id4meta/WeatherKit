@@ -351,3 +351,78 @@ test("ConvertPrecipitationIntensity calibrates mmph to the Weibull saturation cu
     const extreme = ForecastNextHour.ConvertPrecipitationIntensity(100, "mmph");
     assert.ok(extreme < 3.0 && extreme > 2.95);
 });
+
+// 第 15 轮记录的真实 WK2 ConditionType 表（自真实 FlatBuffer schema 解码）：
+// CLEAR 0 / SLEET 3 / POSSIBLE_SLEET 4 / HEAVY_RAIN 5 / RAIN 6 / DRIZZLE 7 /
+// POSSIBLE_DRIZZLE 8 / HEAVY_SNOW 9 / SNOW 10；无 FLURRIES / HAIL 等项。
+// 本地桩 @nsringo/weatherkit 的 WK2 表比真实包丰富（含 FLURRIES/HAIL），
+// 故本地 Condition() 不会因过滤而清空；以下断言以真实表为准，
+// 验证 Condition 输出的每一项 begin/endCondition 均可被真实 WK2 schema 编码。
+const REAL_WK2_CONDITION_TYPES = new Set([
+    "CLEAR",
+    "SLEET",
+    "POSSIBLE_SLEET",
+    "HEAVY_RAIN",
+    "RAIN",
+    "DRIZZLE",
+    "POSSIBLE_DRIZZLE",
+    "HEAVY_SNOW",
+    "SNOW",
+]);
+
+function lastMinuteSwitchMinutes(description, intensity) {
+    const minutes = Array.from({ length: 85 }, (_, index) => {
+        const raining = index < 43 || (index >= 59 && index < 65);
+        return {
+            precipitationChance: raining ? 100 : 0,
+            precipitationIntensity: raining ? intensity : 0,
+            startTime: BASE_TIME + index * 60,
+        };
+    });
+    return ForecastNextHour.Minute(minutes, description, "mmph");
+}
+
+test("Condition keeps three segments when the last minute switches to light snow", () => {
+    const minutes = lastMinuteSwitchMinutes("未来2小时有降雪", 0.2);
+    const summaries = ForecastNextHour.Summary(minutes, "v3");
+    assert.deepEqual(
+        summaries.map(summary => summary.clear),
+        [false, true, false],
+    );
+    const conditions = ForecastNextHour.Condition(summaries, "v3");
+    assert.equal(conditions.length, 3);
+    for (const condition of conditions) {
+        assert.ok(REAL_WK2_CONDITION_TYPES.has(condition.beginCondition), `beginCondition ${condition.beginCondition} is not in the real WK2 table`);
+        assert.ok(REAL_WK2_CONDITION_TYPES.has(condition.endCondition), `endCondition ${condition.endCondition} is not in the real WK2 table`);
+    }
+});
+
+test("Condition keeps three segments when the last minute switches to hail", () => {
+    const minutes = lastMinuteSwitchMinutes("未来2小时有冰雹", 1.0);
+    const summaries = ForecastNextHour.Summary(minutes, "v3");
+    assert.deepEqual(
+        summaries.map(summary => summary.clear),
+        [false, true, false],
+    );
+    const conditions = ForecastNextHour.Condition(summaries, "v3");
+    assert.equal(conditions.length, 3);
+    for (const condition of conditions) {
+        assert.ok(REAL_WK2_CONDITION_TYPES.has(condition.beginCondition), `beginCondition ${condition.beginCondition} is not in the real WK2 table`);
+        assert.ok(REAL_WK2_CONDITION_TYPES.has(condition.endCondition), `endCondition ${condition.endCondition} is not in the real WK2 table`);
+    }
+});
+
+test("Condition keeps three segments when the last minute switches to rain", () => {
+    const minutes = lastMinuteSwitchMinutes("未来2小时有降水", 1.0);
+    const summaries = ForecastNextHour.Summary(minutes, "v3");
+    assert.deepEqual(
+        summaries.map(summary => summary.clear),
+        [false, true, false],
+    );
+    const conditions = ForecastNextHour.Condition(summaries, "v3");
+    assert.equal(conditions.length, 3);
+    for (const condition of conditions) {
+        assert.ok(REAL_WK2_CONDITION_TYPES.has(condition.beginCondition), `beginCondition ${condition.beginCondition} is not in the real WK2 table`);
+        assert.ok(REAL_WK2_CONDITION_TYPES.has(condition.endCondition), `endCondition ${condition.endCondition} is not in the real WK2 table`);
+    }
+});

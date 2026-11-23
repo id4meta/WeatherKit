@@ -67,3 +67,21 @@ test("ForecastHourly clamps out-of-range probabilities to 0-100", async () => {
         [0, 100],
     );
 });
+
+test("Minutely skips HK, MO, TW, UA and PL without fetching", async () => {
+    const originalFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+        fetchCalls++;
+        throw new Error("fetch must not be called for unsupported Minutely countries");
+    };
+    try {
+        for (const country of ["HK", "MO", "TW", "UA", "PL"]) {
+            const colorfulClouds = new ColorfulClouds({ country, language: "zh-CN", latitude: "22.54", longitude: "114.06" }, "test-token");
+            assert.equal(await colorfulClouds.Minutely(), undefined);
+        }
+        assert.equal(fetchCalls, 0);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
