@@ -376,37 +376,8 @@ export async function Response($request, $response) {
                                     const effectiveNextHour = patch.forecastNextHour ?? body.forecastNextHour;
                                     if (syncCurrentConditionWithNextHour(effectiveCurrentWeather, effectiveNextHour)) patch.currentWeather = effectiveCurrentWeather;
                                     sanitizeResponseMetadata(body, patch);
-                                    const describeType = v => (v === null ? "null" : Array.isArray(v) ? `Array(${v.length}:${typeof v[0]})` : ArrayBuffer.isView(v) ? `${v.constructor.name}(${v.length})` : typeof v);
-                                    const diffTypes = (orig, res, prefix) => {
-                                        if (!orig || !res || typeof orig !== "object" || typeof res !== "object") return [];
-                                        const out = [];
-                                        for (const key of new Set([...Object.keys(orig), ...Object.keys(res)])) {
-                                            const ot = describeType(orig[key]);
-                                            const rt = describeType(res[key]);
-                                            if (ot !== rt) out.push(`${prefix}.${key}:${ot}->${rt}`);
-                                        }
-                                        return out;
-                                    };
-                                    if (patch.currentWeather) Console.warn("WK3_DIAG_CW", JSON.stringify(diffTypes(body.currentWeather, patch.currentWeather, "cw")));
-                                    if (patch.forecastDaily) Console.warn("WK3_DIAG_FD", JSON.stringify([
-                                        ...diffTypes(body.forecastDaily, patch.forecastDaily, "fd"),
-                                        ...diffTypes(body.forecastDaily?.days?.[0], patch.forecastDaily?.days?.[0], "fd.day0"),
-                                        ...diffTypes(body.forecastDaily?.days?.[0]?.daytimeForecast, patch.forecastDaily?.days?.[0]?.daytimeForecast, "fd.day0.day"),
-                                    ]));
-                                    if (patch.forecastHourly) Console.warn("WK3_DIAG_FH", JSON.stringify([
-                                        ...diffTypes(body.forecastHourly, patch.forecastHourly, "fh"),
-                                        ...diffTypes(body.forecastHourly?.hours?.[0], patch.forecastHourly?.hours?.[0], "fh.hr0"),
-                                    ]));
-                                    // 额外对照：把完全未改动的苹果原厂 body.currentWeather 单独送入 encode 试编，
-                                    // 用于 100% 区分“我们注入改坏了字段”还是“上游 @nsringo/weatherkit@2.1.0 本身无法往返编码 iOS 27.3 原包”。
-                                    if (body.currentWeather) {
-                                        try {
-                                            WeatherKit3.encode(ByteBuffer, { currentWeather: body.currentWeather });
-                                            Console.warn("WK3_DIAG_ORIG_CW", "encode_called_ok");
-                                        } catch (e) {
-                                            Console.warn("WK3_DIAG_ORIG_CW", `threw:${e?.message ?? e}`);
-                                        }
-                                    }
+                                    adaptWK3ConditionCode(patch);
+                                    adaptWK3PrecipitationAmount(patch);
                                     if (Object.keys(patch).length > 0) rawBody = WeatherKit3.encode(ByteBuffer, patch);
                                     break;
                                 }
@@ -472,6 +443,51 @@ async function InjectCurrentWeather(currentWeather, Settings, enviroments) {
 }
 
 /**
+ * WK3 二进制分支专用形状适配：把注入的标量字符串 conditionCode 包回单元素数组。
+ * WK3 协议里 conditionCode 是单元素字符串数组；彩云/和风注入写入标量字符串，
+ * 会导致 WeatherKit3.encode.compile 报 Invalid WK3 vector。已是数组则保持不变（幂等）。
+ * 仅在 v3 二进制分支调用；v2 与 v3 JSON 分支不受影响。
+ */
+export function adaptWK3ConditionCode(patch) {
+    if (!patch || typeof patch !== "object") return;
+    const adapt = value => {
+        if (typeof value?.conditionCode === "string") value.conditionCode = [value.conditionCode];
+    };
+    adapt(patch.currentWeather);
+    if (Array.isArray(patch.forecastDaily?.days)) {
+        for (const day of patch.forecastDaily.days) {
+            adapt(day);
+            adapt(day?.daytimeForecast);
+            adapt(day?.overnightForecast);
+            adapt(day?.restOfDayForecast);
+        }
+    }
+    if (Array.isArray(patch.forecastHourly?.hours)) {
+        for (const hour of patch.forecastHourly.hours) adapt(hour);
+    }
+}
+
+/**
+ * WK3 二进制分支专用形状适配：把注入的标量数字 precipitationAmount 回填为
+ * WK3 降水量对象 { expected, minimum, maximum }（对象键结构见
+ * tests/weatherKit3WeatherReplacement.test.mjs:65,81；三键取同一彩云数值，
+ * 与该测试的 mock 形态一致）。已是对象则保持不变。
+ * 仅在 v3 二进制分支调用；v2 与 v3 JSON 分支不受影响（JSON 里降水量本就是数字）。
+ */
+export function adaptWK3PrecipitationAmount(patch) {
+    if (!patch || typeof patch !== "object") return;
+    const hours = patch.forecastHourly?.hours;
+    if (!Array.isArray(hours)) return;
+    for (const hour of hours) {
+        if (!hour || typeof hour !== "object") continue;
+        const amount = hour.precipitationAmount;
+        if (typeof amount === "number" && Number.isFinite(amount)) {
+            hour.precipitationAmount = { expected: amount, minimum: amount, maximum: amount };
+        }
+    }
+}
+
+/**
  * 分钟雷达确认正在下雨、实况却报无雨云况时，把实况天气状况同步为雨。
  * 实况与分钟降水来自两条独立路径：实况取彩云 realtime skycon 分类型，分钟降水取雷达降水强度；
  * 雨势初起时 skycon 仍可能报多云，两者无人对齐，此处仅在“分钟雷达确认此刻正在下雨、实况却报无雨”时兜底，无雨时不干预。
@@ -481,10 +497,12 @@ async function InjectCurrentWeather(currentWeather, Settings, enviroments) {
  * @param {any} forecastNextHour - 未来一小时分钟降水对象
  * @returns {boolean} 是否改写了 conditionCode
  */
-function syncCurrentConditionWithNextHour(currentWeather, forecastNextHour) {
+export function syncCurrentConditionWithNextHour(currentWeather, forecastNextHour) {
     if (!currentWeather || !forecastNextHour) return false;
+    const isConditionArray = Array.isArray(currentWeather.conditionCode);
+    const currentCondition = isConditionArray ? currentWeather.conditionCode[0] : currentWeather.conditionCode;
     const noRainConditions = new Set(["CLEAR", "MOSTLY_CLEAR", "PARTLY_CLOUDY", "MOSTLY_CLOUDY", "CLOUDY", "HAZE", "FOGGY", "WINDY"]);
-    if (!noRainConditions.has(currentWeather.conditionCode)) return false;
+    if (!noRainConditions.has(currentCondition)) return false;
     const firstMinute = Array.isArray(forecastNextHour.minutes) ? forecastNextHour.minutes[0] : undefined;
     const firstIntensity = Number(firstMinute?.precipitationIntensity);
     const firstSummary = Array.isArray(forecastNextHour.summary) ? forecastNextHour.summary[0] : undefined;
@@ -501,9 +519,9 @@ function syncCurrentConditionWithNextHour(currentWeather, forecastNextHour) {
     } else {
         nextCondition = "RAIN";
     }
-    if (nextCondition === currentWeather.conditionCode) return false;
+    if (nextCondition === currentCondition) return false;
     Console.info("syncCurrentConditionWithNextHour", `conditionCode: ${currentWeather.conditionCode} -> ${nextCondition}`, `firstMinuteIntensity: ${firstIntensity}`);
-    currentWeather.conditionCode = nextCondition;
+    currentWeather.conditionCode = isConditionArray ? [nextCondition] : nextCondition;
     return true;
 }
 
