@@ -376,6 +376,37 @@ export async function Response($request, $response) {
                                     const effectiveNextHour = patch.forecastNextHour ?? body.forecastNextHour;
                                     if (syncCurrentConditionWithNextHour(effectiveCurrentWeather, effectiveNextHour)) patch.currentWeather = effectiveCurrentWeather;
                                     sanitizeResponseMetadata(body, patch);
+                                    const describeType = v => (v === null ? "null" : Array.isArray(v) ? `Array(${v.length}:${typeof v[0]})` : ArrayBuffer.isView(v) ? `${v.constructor.name}(${v.length})` : typeof v);
+                                    const diffTypes = (orig, res, prefix) => {
+                                        if (!orig || !res || typeof orig !== "object" || typeof res !== "object") return [];
+                                        const out = [];
+                                        for (const key of new Set([...Object.keys(orig), ...Object.keys(res)])) {
+                                            const ot = describeType(orig[key]);
+                                            const rt = describeType(res[key]);
+                                            if (ot !== rt) out.push(`${prefix}.${key}:${ot}->${rt}`);
+                                        }
+                                        return out;
+                                    };
+                                    if (patch.currentWeather) Console.warn("WK3_DIAG_CW", JSON.stringify(diffTypes(body.currentWeather, patch.currentWeather, "cw")));
+                                    if (patch.forecastDaily) Console.warn("WK3_DIAG_FD", JSON.stringify([
+                                        ...diffTypes(body.forecastDaily, patch.forecastDaily, "fd"),
+                                        ...diffTypes(body.forecastDaily?.days?.[0], patch.forecastDaily?.days?.[0], "fd.day0"),
+                                        ...diffTypes(body.forecastDaily?.days?.[0]?.daytimeForecast, patch.forecastDaily?.days?.[0]?.daytimeForecast, "fd.day0.day"),
+                                    ]));
+                                    if (patch.forecastHourly) Console.warn("WK3_DIAG_FH", JSON.stringify([
+                                        ...diffTypes(body.forecastHourly, patch.forecastHourly, "fh"),
+                                        ...diffTypes(body.forecastHourly?.hours?.[0], patch.forecastHourly?.hours?.[0], "fh.hr0"),
+                                    ]));
+                                    // 额外对照：把完全未改动的苹果原厂 body.currentWeather 单独送入 encode 试编，
+                                    // 用于 100% 区分“我们注入改坏了字段”还是“上游 @nsringo/weatherkit@2.1.0 本身无法往返编码 iOS 27.3 原包”。
+                                    if (body.currentWeather) {
+                                        try {
+                                            WeatherKit3.encode(ByteBuffer, { currentWeather: body.currentWeather });
+                                            Console.warn("WK3_DIAG_ORIG_CW", "encode_called_ok");
+                                        } catch (e) {
+                                            Console.warn("WK3_DIAG_ORIG_CW", `threw:${e?.message ?? e}`);
+                                        }
+                                    }
                                     if (Object.keys(patch).length > 0) rawBody = WeatherKit3.encode(ByteBuffer, patch);
                                     break;
                                 }
