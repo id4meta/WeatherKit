@@ -354,7 +354,9 @@ export async function Response($request, $response) {
                                                     if (Settings?.LogLevel === "DEBUG" || Settings?.LogLevel === "ALL") {
                                                         matchEnum.airQuality();
                                                     }
-                                                    patch.airQuality = await InjectAirQuality(body.airQuality, Settings, Caches, enviroments);
+                                                    const airQualityResult = await InjectAirQuality(body.airQuality, Settings, Caches, enviroments);
+                                                    if (airQualityResult !== undefined) patch.airQuality = airQualityResult;
+                                                    else delete patch.airQuality;
                                                     break;
                                                 }
                                                 case "forecastNextHour": {
@@ -512,12 +514,11 @@ export function syncCurrentConditionWithNextHour(currentWeather, forecastNextHou
     const firstMinute = Array.isArray(forecastNextHour.minutes) ? forecastNextHour.minutes[0] : undefined;
     const firstIntensity = Number(firstMinute?.precipitationIntensity);
     const hasPerceived = typeof firstMinute?.perceivedPrecipitationIntensity === "number" && Number.isFinite(firstMinute.perceivedPrecipitationIntensity);
+    const firstPerceived = Number(firstMinute?.perceivedPrecipitationIntensity);
     const firstSummary = Array.isArray(forecastNextHour.summary) ? forecastNextHour.summary[0] : undefined;
     const summaryConditions = Array.isArray(firstSummary?.condition) ? firstSummary.condition : firstSummary?.condition == null ? [] : [firstSummary.condition];
     const summaryRaining = firstSummary?.clear === false && summaryConditions.some(condition => RAIN_SUMMARY_CONDITIONS.has(condition));
-    const rainingNow = hasPerceived
-        ? firstMinute.perceivedPrecipitationIntensity >= 0.1
-        : (Number.isFinite(firstIntensity) && firstIntensity > 0) || summaryRaining;
+    const rainingNow = (Number.isFinite(firstPerceived) && firstPerceived >= 0.1) || summaryRaining;
     if (!rainingNow) return false;
 
     let changed = false;
@@ -526,12 +527,14 @@ export function syncCurrentConditionWithNextHour(currentWeather, forecastNextHou
         let nextCondition;
         if (typeof firstMinute?.condition === "string" && firstMinute.condition && firstMinute.condition !== "CLEAR") {
             nextCondition = firstMinute.condition;
-        } else if (Number.isFinite(firstIntensity) && firstIntensity > 0) {
-            nextCondition = firstIntensity > 0.08 ? "RAIN" : "DRIZZLE";
-        } else if (firstSummary?.maxCondition === "DRIZZLE" || firstSummary?.maxCondition === "POSSIBLE_DRIZZLE") {
-            nextCondition = "DRIZZLE";
-        } else {
-            nextCondition = "RAIN";
+        } else if (Number.isFinite(firstPerceived)) {
+            if (firstPerceived > 2) nextCondition = "HEAVY_RAIN";
+            else if (firstPerceived > 1) nextCondition = "RAIN";
+            else if (firstPerceived >= 0.1) nextCondition = "DRIZZLE";
+        }
+        if (nextCondition === undefined) {
+            if (firstSummary?.maxCondition === "DRIZZLE" || firstSummary?.maxCondition === "POSSIBLE_DRIZZLE") nextCondition = "DRIZZLE";
+            else nextCondition = "RAIN";
         }
         if (nextCondition !== currentCondition) {
             Console.info("syncCurrentConditionWithNextHour", `conditionCode: ${currentWeather.conditionCode} -> ${nextCondition}`, `firstMinuteIntensity: ${firstIntensity}`);

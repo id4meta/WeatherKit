@@ -136,7 +136,7 @@ export default class ColorfulClouds {
             Minutely: [
                 "CN",
             ],
-            AirQuality: ["CN", "HK", "MO"],
+            AirQuality: ["CN"],
         },
     };
 
@@ -487,7 +487,8 @@ export default class ColorfulClouds {
                             const isDayProbPercent = this.#IsPercentProbabilityScale((body?.result?.daily?.precipitation ?? []).map(item => item?.probability));
                             const isDaytimeProbPercent = this.#IsPercentProbabilityScale((body?.result?.daily?.precipitation_08h_20h ?? []).map(item => item?.probability));
                             const isOvernightProbPercent = this.#IsPercentProbabilityScale((body?.result?.daily?.precipitation_20h_32h ?? []).map(item => item?.probability));
-                            for (let i = 0; i < dailysteps; i++) {
+                            const dayCount = Math.min(dailysteps, Array.isArray(body?.result?.daily?.skycon) ? body.result.daily.skycon.length : 0);
+                            for (let i = 0; i < dayCount; i++) {
                                 const timeStamp = (new Date(body?.result?.daily?.skycon?.[i]?.date).getTime() / 1000) | 0;
                                 forecastDaily.days.push({
                                     forecastStart: timeStamp,
@@ -872,31 +873,31 @@ export default class ColorfulClouds {
         return {
             metadata: this.#Metadata(hourly.result.server_time, hourly.location),
             hours: Array.from({ length: hourly.result.hourly.skycon.length }, (_, i) => ({
-                cloudCover: Math.round(hourly.result.hourly.cloudrate[i].value * 100),
+                cloudCover: Math.round(hourly.result.hourly.cloudrate[i]?.value * 100),
                 // cloudCoverHighAltPct: 0, // Not given
                 // cloudCoverLowAltPct: 0, // Not given
                 // cloudCoverMidAltPct: 0, // Not given
                 ...Weather.ConvertWeatherCodeField(hourly.result.hourly.skycon[i].value),
                 // daylight: false, // Not given
                 forecastStart: (new Date(hourly.result.hourly.skycon[i].datetime).getTime() / 1000) | 0,
-                humidity: Math.round(hourly.result.hourly.humidity[i].value * 100),
+                humidity: Math.round(hourly.result.hourly.humidity[i]?.value * 100),
                 // perceivedPrecipitationIntensity: "", // Not given
-                precipitationAmount: hourly.result.hourly.precipitation[i].value,
+                precipitationAmount: hourly.result.hourly.precipitation[i]?.value,
                 precipitationChance: this.#NormalizeProbability(hourly.result.hourly.precipitation[i]?.probability, isHourlyProbPercent),
                 // precipitationIntensity: 0, // Not given
                 // precipitationType: "", // Not given
-                pressure: hourly.result.hourly.pressure[i].value / 100,
+                pressure: hourly.result.hourly.pressure[i]?.value / 100,
                 // pressureTrend: "", // Not given
                 // snowfallAmount: 0, // Not given
                 // snowfallIntensity: 0, // Not given
-                temperature: hourly.result.hourly.temperature[i].value,
-                temperatureApparent: hourly.result.hourly.apparent_temperature[i].value,
+                temperature: hourly.result.hourly.temperature[i]?.value,
+                temperatureApparent: hourly.result.hourly.apparent_temperature[i]?.value,
                 // temperatureDewPoint: 0, // Not given
                 // uvIndex: 0, // Not given
-                visibility: hourly.result.hourly.visibility[i].value * 1000,
-                windDirection: this.#RoundUInt(hourly.result.hourly.wind[i].direction, 0, 360),
+                visibility: hourly.result.hourly.visibility[i]?.value * 1000,
+                windDirection: this.#RoundUInt(hourly.result.hourly.wind[i]?.direction, 0, 360),
                 // windGust: 0, // Not given
-                windSpeed: hourly.result.hourly.wind[i].speed,
+                windSpeed: hourly.result.hourly.wind[i]?.speed,
             })),
         };
     }

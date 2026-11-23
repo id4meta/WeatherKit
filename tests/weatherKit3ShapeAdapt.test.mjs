@@ -172,3 +172,37 @@ test("resolveCountryForResponse infers CN/HK from domestic coordinates when coun
     const xiamenCN = new URL("https://weatherkit.apple.com/api/v3/weather/zh-Hans-CN/24.479/118.089?country=CN");
     assert.equal(resolveCountryForResponse(xiamenCN, { country: "CN", latitude: "24.479", longitude: "118.089" }), "CN");
 });
+
+test("syncCurrentConditionWithNextHour ignores sub-visible radar noise below 0.08 mm/h", () => {
+    const currentWeather = { conditionCode: "CLOUDY" };
+    const forecastNextHour = {
+        minutes: [{ precipitationIntensity: 0.04, perceivedPrecipitationIntensity: 0 }],
+        summary: [{ clear: true }],
+    };
+    assert.equal(syncCurrentConditionWithNextHour(currentWeather, forecastNextHour), false);
+    assert.equal(currentWeather.conditionCode, "CLOUDY");
+});
+
+test("syncCurrentConditionWithNextHour maps perceived intensity to the Apple curve scale", () => {
+    const cases = [
+        [0.5, "DRIZZLE"],
+        [1.37, "RAIN"],
+        [2.2, "HEAVY_RAIN"],
+    ];
+    for (const [perceived, expected] of cases) {
+        const currentWeather = { conditionCode: "CLOUDY" };
+        const forecastNextHour = { minutes: [{ precipitationIntensity: perceived, perceivedPrecipitationIntensity: perceived }] };
+        assert.equal(syncCurrentConditionWithNextHour(currentWeather, forecastNextHour), true);
+        assert.equal(currentWeather.conditionCode, expected);
+    }
+});
+
+test("syncCurrentConditionWithNextHour ignores sub-visible intensity without a perceived value", () => {
+    const currentWeather = { conditionCode: "CLOUDY" };
+    const forecastNextHour = {
+        minutes: [{ precipitationIntensity: 0.04 }],
+        summary: [{ clear: true }],
+    };
+    assert.equal(syncCurrentConditionWithNextHour(currentWeather, forecastNextHour), false);
+    assert.equal(currentWeather.conditionCode, "CLOUDY");
+});

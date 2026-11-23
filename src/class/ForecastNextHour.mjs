@@ -14,6 +14,12 @@ const WK2_CONDITION_FALLBACK = {
     POSSIBLE_FLURRIES: "SNOW",
     HAIL: "SLEET",
     POSSIBLE_HAIL: "POSSIBLE_SLEET",
+    MIXED: "SLEET",
+    POSSIBLE_MIXED: "POSSIBLE_SLEET",
+    PRECIPITATION: "RAIN",
+    POSSIBLE_PRECIPITATION: "POSSIBLE_DRIZZLE",
+    POSSIBLE_RAIN: "POSSIBLE_DRIZZLE",
+    POSSIBLE_SNOW: "SNOW",
 };
 
 export default class ForecastNextHour {
@@ -117,7 +123,8 @@ export default class ForecastNextHour {
     // 根据描述文本猜测降水类型
     static PrecipitationType(sentence) {
         Console.info("☑️ PrecipitationType", `sentence: ${sentence}`);
-        const precipitationType = Object.entries(ForecastNextHour.#Configs.PrecipitationType).find(([key]) => sentence.includes(key))?.[1] ?? "CLEAR";
+        const normalizedSentence = String(sentence ?? "").replace(/不会下[雨雪冰雹]+|无[降]?[雨雪冰雹]+/g, "");
+        const precipitationType = Object.entries(ForecastNextHour.#Configs.PrecipitationType).find(([key]) => normalizedSentence.includes(key))?.[1] ?? "CLEAR";
         Console.info(`✅ PrecipitationType: ${precipitationType}`);
         return precipitationType;
     }

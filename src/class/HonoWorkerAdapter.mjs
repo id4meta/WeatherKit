@@ -158,7 +158,7 @@ export default class HonoWorkerAdapter {
         const status = $response.status ?? $response.statusCode ?? 200;
         const body = $response.body ?? $response.bodyBytes ?? null;
         const acceptEncoding = c.req?.header?.("accept-encoding") || "";
-        if (body && typeof CompressionStream === "function" && /\bgzip\b/i.test(acceptEncoding)) {
+        if (body && typeof CompressionStream === "function" && /\bgzip\b/i.test(acceptEncoding) && status !== 204 && status !== 304 && c.req?.method !== "HEAD") {
             const rawBytes =
                 body instanceof Uint8Array
                     ? body

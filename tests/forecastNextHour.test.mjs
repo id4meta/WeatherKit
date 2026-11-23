@@ -426,3 +426,11 @@ test("Condition keeps three segments when the last minute switches to rain", () 
         assert.ok(REAL_WK2_CONDITION_TYPES.has(condition.endCondition), `endCondition ${condition.endCondition} is not in the real WK2 table`);
     }
 });
+
+test("PrecipitationType ignores a negated snow phrase when light rain follows", () => {
+    assert.equal(ForecastNextHour.PrecipitationType("未来两小时不会下雪，但有小雨"), "RAIN");
+});
+
+test("PrecipitationType strips a negated rain phrase before matching snow", () => {
+    assert.equal(ForecastNextHour.PrecipitationType("未来两小时不会下雨，但有小雪"), "SNOW");
+});
