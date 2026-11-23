@@ -137,8 +137,8 @@ export default class HonoWorkerAdapter {
      */
     static cleanupResponseHeaders(headers = {}) {
         const normalizedHeaders = { ...headers };
-        if (normalizedHeaders["Content-Encoding"]) normalizedHeaders["Content-Encoding"] = "identity";
-        if (normalizedHeaders["content-encoding"]) normalizedHeaders["content-encoding"] = "identity";
+        delete normalizedHeaders["Content-Encoding"];
+        delete normalizedHeaders["content-encoding"];
         delete normalizedHeaders["Content-Length"];
         delete normalizedHeaders["content-length"];
         delete normalizedHeaders["Transfer-Encoding"];
@@ -155,6 +155,33 @@ export default class HonoWorkerAdapter {
      */
     static writeResponse(c, $response = {}) {
         const headers = HonoWorkerAdapter.cleanupResponseHeaders($response.headers ?? {});
+        const status = $response.status ?? $response.statusCode ?? 200;
+        const body = $response.body ?? $response.bodyBytes ?? null;
+        const acceptEncoding = c.req?.header?.("accept-encoding") || "";
+        if (body && typeof CompressionStream === "function" && /\bgzip\b/i.test(acceptEncoding)) {
+            const rawBytes =
+                body instanceof Uint8Array
+                    ? body
+                    : body instanceof ArrayBuffer
+                      ? new Uint8Array(body)
+                      : typeof body === "string"
+                        ? new TextEncoder().encode(body)
+                        : null;
+            if (rawBytes && rawBytes.byteLength >= 2048) {
+                const respHeaders = new Headers();
+                for (const [key, value] of Object.entries(headers)) {
+                    if (Array.isArray(value)) {
+                        for (const entry of value) respHeaders.append(key, entry.toString());
+                    } else if (value !== undefined) {
+                        respHeaders.set(key, value.toString());
+                    }
+                }
+                respHeaders.set("Content-Encoding", "gzip");
+                respHeaders.set("Vary", "Accept-Encoding");
+                const compressed = new Blob([rawBytes]).stream().pipeThrough(new CompressionStream("gzip"));
+                return new Response(compressed, { status, headers: respHeaders, encodeBody: "manual" });
+            }
+        }
         for (const [key, value] of Object.entries(headers)) {
             if (Array.isArray(value)) {
                 for (const entry of value) c.header(key, entry.toString(), { append: true });
@@ -162,8 +189,8 @@ export default class HonoWorkerAdapter {
             }
             if (value !== undefined) c.header(key, value.toString());
         }
-        c.status($response.status ?? $response.statusCode ?? 200);
-        return c.body($response.body ?? $response.bodyBytes ?? null);
+        c.status(status);
+        return c.body(body);
     }
 
     /**

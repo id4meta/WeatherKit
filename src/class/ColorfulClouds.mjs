@@ -265,6 +265,64 @@ export default class ColorfulClouds {
         return this.#inflight.realtime;
     }
 
+    async #FetchMinutely() {
+        Console.info("☑️ FetchMinutely");
+
+        if (this.#cache.minutely?.result?.minutely?.status === "ok") {
+            Console.info("✅ FetchMinutely", "Using cache");
+            return this.#cache.minutely;
+        }
+        if (this.#inflight.minutely) {
+            Console.info("✅ FetchMinutely", "Joining in-flight request");
+            return this.#inflight.minutely;
+        }
+
+        const request = {
+            url: `${this.endpoint}/minutely?unit=metric:v2&lang=${this.language}`,
+            headers: this.headers,
+        };
+        this.#inflight.minutely = (async () => {
+            try {
+                const body = await fetch(request).then(response => JSON.parse(response?.body ?? "{}"));
+                switch (body?.status) {
+                    case "ok": {
+                        switch (body?.result?.minutely?.status) {
+                            case "ok": {
+                                this.#cache.minutely = body;
+                                break;
+                            }
+                            case "error":
+                            case "failed":
+                            case undefined:
+                                throw Error(JSON.stringify({ status: body?.result?.minutely?.status, reason: body?.result?.minutely }));
+                        }
+                        Console.info("✅ FetchMinutely");
+                        return body;
+                    }
+                    case "error":
+                    case "failed":
+                    case undefined:
+                        throw Error(JSON.stringify(body ?? {}));
+                }
+            } catch (error) {
+                Console.error(`FetchMinutely: ${error}`);
+            } finally {
+                delete this.#inflight.minutely;
+                Console.info("✅ FetchMinutely");
+            }
+            return undefined;
+        })();
+        return this.#inflight.minutely;
+    }
+
+    prefetchRealTime() {
+        return this.#RealTime().catch(() => ({}));
+    }
+
+    prefetchMinutely() {
+        return this.#FetchMinutely().catch(() => undefined);
+    }
+
     async Minutely() {
         Console.info("☑️ Minutely");
         // 判断可用性：当前数据源不支持这个国家/地区
@@ -273,13 +331,9 @@ export default class ColorfulClouds {
             return;
         }
 
-        const request = {
-            url: `${this.endpoint}/minutely?unit=metric:v2&lang=${this.language}`,
-            headers: this.headers,
-        };
         let forecastNextHour;
         try {
-            const body = await fetch(request).then(response => JSON.parse(response?.body ?? "{}"));
+            const body = await this.#FetchMinutely();
             switch (body?.status) {
                 case "ok":
                     switch (body?.result?.minutely?.status) {
@@ -474,7 +528,7 @@ export default class ColorfulClouds {
     async Daily(dailysteps = 10, begin = undefined) {
         Console.info("☑️ Daily");
         const request = {
-            url: `${this.endpoint}/daily?dailysteps=${dailysteps}&lang=${this.language}`,
+            url: `${this.endpoint}/daily?dailysteps=${dailysteps}&unit=metric:v2&lang=${this.language}`,
             headers: this.headers,
         };
         if (begin) request.url += `&begin=${begin}`;

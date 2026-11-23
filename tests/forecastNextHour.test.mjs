@@ -290,8 +290,8 @@ function parameterCount(token) {
 }
 
 test("Summary keeps the final minute switch as its own segment in v3", () => {
-    const minutes = Array.from({ length: 71 }, (_, index) => {
-        const raining = index < 14 || (index >= 39 && index < 70);
+    const minutes = Array.from({ length: 60 }, (_, index) => {
+        const raining = index < 14 || (index >= 39 && index < 59);
         return {
             summaryCondition: raining ? "RAIN" : "CLEAR",
             condition: raining ? "RAIN" : "CLEAR",
@@ -313,4 +313,30 @@ test("Summary keeps the final minute switch as its own segment in v3", () => {
     const conditions = ForecastNextHour.Condition(summaries, "v3");
     assert.ok(conditions.length > 0);
     assert.equal(conditions.length, 4);
+});
+
+test("Summary ignores rain beyond the 60-minute window in v3", () => {
+    const minutes = Array.from({ length: 85 }, (_, index) => {
+        const raining = index >= 66 && index <= 68;
+        return {
+            summaryCondition: raining ? "RAIN" : "CLEAR",
+            condition: raining ? "RAIN" : "CLEAR",
+            clear: !raining,
+            startTime: BASE_TIME + index * 60,
+            precipitationChance: raining ? 100 : 0,
+            precipitationIntensity: raining ? 1 : 0,
+        };
+    });
+
+    const summaries = ForecastNextHour.Summary(minutes, "v3");
+    assert.equal(summaries.length, 1);
+    assert.deepEqual(
+        summaries.map(summary => summary.clear),
+        [true],
+    );
+});
+
+test("ConvertPrecipitationIntensity restores the 3.0 cap for heavy rain", () => {
+    assert.ok(ForecastNextHour.ConvertPrecipitationIntensity(10, "mmph") > 2.0);
+    assert.equal(ForecastNextHour.ConvertPrecipitationIntensity(50, "mmph"), 3);
 });

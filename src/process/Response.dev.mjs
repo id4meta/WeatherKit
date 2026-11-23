@@ -101,7 +101,7 @@ export async function Response($request, $response) {
                                     // REST JSON 表示沿用标量形状，供应商按标量产出 / REST JSON uses scalar shapes, so providers produce scalars.
                                     const providerParameters = { ...parameters, version: "v2", weatherKitLanguage: body.weatherAlerts?.metadata?.language };
                                     const enviroments = {
-                                        colorfulClouds: new ColorfulClouds(providerParameters, Settings?.API?.ColorfulClouds?.Token || "Y2FpeXVuX25vdGlmeQ=="),
+                                        colorfulClouds: $request?._prefetchedColorfulClouds ?? new ColorfulClouds(providerParameters, Settings?.API?.ColorfulClouds?.Token || "Y2FpeXVuX25vdGlmeQ=="),
                                         qWeather: new QWeather(providerParameters, Settings?.API?.QWeather?.Token || "bdd98ec1d87747f3a2e8b1741a5af796", Settings?.API?.QWeather?.Host),
                                         waqi: new WAQI(parameters, Settings?.API?.WAQI?.Token),
                                         country: parameters.country,
@@ -210,7 +210,7 @@ export async function Response($request, $response) {
                                         await matchEnum.init();
                                     }
                                     const enviroments = {
-                                        colorfulClouds: new ColorfulClouds(providerParameters, Settings?.API?.ColorfulClouds?.Token || "Y2FpeXVuX25vdGlmeQ=="),
+                                        colorfulClouds: $request?._prefetchedColorfulClouds ?? new ColorfulClouds(providerParameters, Settings?.API?.ColorfulClouds?.Token || "Y2FpeXVuX25vdGlmeQ=="),
                                         qWeather: new QWeather(providerParameters, Settings?.API?.QWeather?.Token || "bdd98ec1d87747f3a2e8b1741a5af796", Settings?.API?.QWeather?.Host),
                                         waqi: new WAQI(parameters, Settings?.API?.WAQI?.Token),
                                         country: parameters.country,
@@ -306,7 +306,7 @@ export async function Response($request, $response) {
                                         await matchEnum.init();
                                     }
                                     const enviroments = {
-                                        colorfulClouds: new ColorfulClouds(providerParameters, Settings?.API?.ColorfulClouds?.Token || "Y2FpeXVuX25vdGlmeQ=="),
+                                        colorfulClouds: $request?._prefetchedColorfulClouds ?? new ColorfulClouds(providerParameters, Settings?.API?.ColorfulClouds?.Token || "Y2FpeXVuX25vdGlmeQ=="),
                                         qWeather: new QWeather(providerParameters, Settings?.API?.QWeather?.Token || "bdd98ec1d87747f3a2e8b1741a5af796", Settings?.API?.QWeather?.Host),
                                         waqi: new WAQI(parameters, Settings?.API?.WAQI?.Token),
                                         country: parameters.country,
@@ -579,6 +579,7 @@ export function resolveCountryForResponse(url, parameters) {
         if (lat >= 22.09 && lat <= 22.25 && lon >= 113.52 && lon <= 113.65) return "MO";
         if (lat >= 21.7 && lat <= 25.4 && lon >= 119.3 && lon <= 122.1) return "TW";
         if (lat >= 18 && lat <= 54 && lon >= 73 && lon <= 135) return "CN";
+        if (parameters?.country === "CN") return undefined;
     }
     return parameters?.country;
 }

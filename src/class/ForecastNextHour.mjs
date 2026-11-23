@@ -208,7 +208,7 @@ export default class ForecastNextHour {
     static Summary(minutes = [], version = "v2") {
         Console.info("☑️ Summary");
         const Summaries = [];
-        const Length = Math.min(71, minutes.length);
+        const Length = Math.min(60, minutes.length);
         if (Length === 0) {
             Console.info("✅ Summary");
             return Summaries;
@@ -372,7 +372,7 @@ export default class ForecastNextHour {
         } else if (units === "mmph" && precipitationIntensity > Range.NO[1]) {
             // 苹果原厂实测幂曲线（波特兰/里士满 WK3 抓包拟合）：
             // perceived ≈ 1.045 × intensity^0.392；上限钳制在 2.0，确保中大雨落入已验证的 RAIN(7) 而非被 iOS 27.3 隐藏的 HEAVY_RAIN(6)/perc>2.0。
-            perceivedPrecipitationIntensity = Math.min(2, Math.max(0.1, Number((1.045 * (precipitationIntensity ** 0.392)).toFixed(3))));
+            perceivedPrecipitationIntensity = Math.min(3.0, Math.max(0.1, Number((1.045 * (precipitationIntensity ** 0.392)).toFixed(3))));
         } else if (precipitationIntensity > Range.LIGHT[0] && precipitationIntensity <= Range.LIGHT[1]) {
             // 小雨，可以感知到；把 LIGHT 段映射到苹果天气可见区间 [0.1, 1.0]。
             // 旧的 [0, 1] 线性缩放会把 0.08–0.419mm/h 的有效小雨压进不可见区间（< 0.1），

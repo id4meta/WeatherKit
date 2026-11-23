@@ -2,7 +2,11 @@ import { fetch } from "@nsnanocat/util";
 import { Hono } from "hono/tiny";
 import HonoWorkerAdapter from "./class/HonoWorkerAdapter.mjs";
 import { Request } from "./process/Request.mjs";
-import { Response } from "./process/Response.mjs";
+import { Response, resolveCountryForResponse } from "./process/Response.mjs";
+import ColorfulClouds from "./class/ColorfulClouds.mjs";
+import database from "./function/database.mjs";
+import parseWeatherKitURL from "./function/parseWeatherKitURL.mjs";
+import setENV from "./function/setENV.mjs";
 /***************** Processing *****************/
 
 export default new Hono()
@@ -13,10 +17,28 @@ export default new Hono()
         let $response;
         ({ $request, $response } = await Request($request));
         switch (typeof $response) {
-            case "undefined":
+            case "undefined": {
+                try {
+                    const reqUrl = new URL($request.url);
+                    if (reqUrl.pathname.startsWith("/api/v3/weather/") || reqUrl.pathname.startsWith("/api/v2/weather/")) {
+                        const params = parseWeatherKitURL(reqUrl);
+                        params.country = resolveCountryForResponse(reqUrl, params);
+                        if (params.country === "CN") {
+                            const { Settings } = setENV("iRingo", "WeatherKit", database);
+                            if (Settings?.Weather?.Provider === "ColorfulClouds" || Settings?.NextHour?.Provider === "ColorfulClouds") {
+                                const cc = new ColorfulClouds(params, Settings?.API?.ColorfulClouds?.Token || "Y2FpeXVuX25vdGlmeQ==");
+                                const ds = new Set(params.dataSets);
+                                if (ds.has("currentWeather") || ds.has("airQuality")) cc.prefetchRealTime();
+                                if (ds.has("forecastNextHour")) cc.prefetchMinutely();
+                                $request._prefetchedColorfulClouds = cc;
+                            }
+                        }
+                    }
+                } catch {}
                 $response = await fetch($request);
                 $response = await Response($request, $response);
                 break;
+            }
             case "object":
                 break;
             default:

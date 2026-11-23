@@ -147,4 +147,10 @@ test("resolveCountryForResponse infers CN/HK from domestic coordinates when coun
 
     const explicit = new URL("https://weatherkit.apple.com/api/v3/weather/zh-Hans-US/32.390/119.499?country=US");
     assert.equal(resolveCountryForResponse(explicit, { country: "US", latitude: "32.390", longitude: "119.499" }), "US");
+
+    const southPacific = new URL("https://weatherkit.apple.com/api/v3/weather/zh-Hans-CN/-1.284/157.931");
+    assert.equal(resolveCountryForResponse(southPacific, { country: "CN", latitude: "-1.284", longitude: "157.931" }), undefined);
+
+    const stLawrence = new URL("https://weatherkit.apple.com/api/v3/weather/zh-Hans-CN/48.0/-62.0");
+    assert.equal(resolveCountryForResponse(stLawrence, { country: "CN", latitude: "48.0", longitude: "-62.0" }), undefined);
 });
