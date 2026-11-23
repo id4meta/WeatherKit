@@ -45,7 +45,11 @@ export default class ForecastNextHour {
             晴朗: "CLEAR",
             雨夹雪: "SLEET",
             rain: "RAIN",
+            precipitation: "RAIN",
             雨: "RAIN",
+            // 通用“降水”描述无雨/雪/冰雹关键词时兜底为 RAIN，不回退为 CLEAR
+            //（分钟数组里有有效降水时 Minute() 另有守卫，见下）。
+            降水: "RAIN",
             snow: "SNOW",
             雪: "SNOW",
             冰雹: "HAIL",
@@ -106,7 +110,12 @@ export default class ForecastNextHour {
 
     static Minute(minutes = [], description = "", units = "mmph") {
         Console.info("☑️ Minute");
-        const precipitationType = ForecastNextHour.PrecipitationType(description);
+        let precipitationType = ForecastNextHour.PrecipitationType(description);
+        // 描述未指明降水类型（如仅含“降水”、或无描述）时，若分钟数组里存在
+        // 有效非零降水，不得回退为 CLEAR，否则 summary 会写 CLEAR、卡片被隐藏。
+        if (precipitationType === "CLEAR" && minutes.some(minute => minute.precipitationIntensity > 0)) {
+            precipitationType = "RAIN";
+        }
         // refer: https://docs.caiyunapp.com/weather-api/v2/v2.6/tables/precip.html
 
         minutes = minutes.map((minute, i) => {
@@ -145,8 +154,9 @@ export default class ForecastNextHour {
                 }
                 minute.summaryCondition = precipitationType;
                 minute.clear = false;
-            } else if (minute.perceivedPrecipitationIntensity > 0.1) {
-                // ❓ perceivedPrecipitationIntensity 小于 0.1, 苹果天气显示为无降水
+            } else if (minute.perceivedPrecipitationIntensity >= 0.1) {
+                // ❓ perceivedPrecipitationIntensity 小于 0.1, 苹果天气显示为无降水；
+                // 边界值 0.1 已属可见轻雨（LIGHT 段下限即 0.1），须落入 DRIZZLE 而非隐藏。
                 // 小雨，可以感知到
                 switch (precipitationType) {
                     case "RAIN":
@@ -393,9 +403,11 @@ export default class ForecastNextHour {
             // 轻微降水，可能感知不到
             perceivedPrecipitationIntensity = 0; // 轻微降水通常感知不到
         } else if (precipitationIntensity > Range.LIGHT[0] && precipitationIntensity <= Range.LIGHT[1]) {
-            // 小雨，可以感知到
-            // 根据强度计算感知强度，在0-1之间
-            perceivedPrecipitationIntensity = Math.min(1, (precipitationIntensity - Range.LIGHT[0]) / (Range.LIGHT[1] - Range.LIGHT[0]));
+            // 小雨，可以感知到；把 LIGHT 段映射到苹果天气可见区间 [0.1, 1.0]。
+            // 旧的 [0, 1] 线性缩放会把 0.08–0.419mm/h 的有效小雨压进不可见区间（< 0.1），
+            // 导致微雨/小雨时逐分钟卡片被苹果隐藏（上游 Issue 82）。
+            const lightProgress = (precipitationIntensity - Range.LIGHT[0]) / (Range.LIGHT[1] - Range.LIGHT[0]);
+            perceivedPrecipitationIntensity = Math.max(0.1, Number((0.1 + Math.min(0.9, lightProgress * 0.9)).toFixed(3)));
         } else if (precipitationIntensity > Range.MODERATE[0] && precipitationIntensity <= Range.MODERATE[1]) {
             // 中雨，明显感知
             // 根据强度计算感知强度，在1-2之间
