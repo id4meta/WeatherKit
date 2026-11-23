@@ -6,15 +6,14 @@ export default class ForecastNextHour {
     Version = "v1.6.5";
     Author = "iRingo";
 
-    // iOS 27 enforces a 15-minute client-side relevance hard cutoff on
-    // NextHour metadata (confirmed on-device 2026-11-23: with a 60-minute
-    // expiry the card still hid after 15 minutes, and the long expiry
-    // blocked weatherd from issuing a standalone
-    // ?dataSets=forecastNextHour refresh before the cutoff). Use 13m58s
-    // (838s) to take nearly the full window while leaving a 62-second
-    // buffer for the refresh. Minutely() additionally caps at forecastEnd
-    // so the claimed validity never outruns the minute data itself.
-    static ExpirationInterval = 13 * 60 + 58;
+    // 苹果原厂动态两档有效期（WK3 真机抓包 2026-11-23，11 个美/加城市）：
+    // 有降水或预告降水（波特兰正在下雨、里士满 24 分钟后预报下雨）时
+    // expireTime - readTime 均为精确 300 秒；全程无雨城市为 3600 秒或 7200 秒。
+    // 旧 838 秒已废弃：国内长沙实测第 12 分钟 UI 已隐藏卡片，但 weatherd 见未过期
+    // 拒绝发刷新请求。Minutely() 按 summary 是否含有效降水动态选档，
+    // 并以 forecastEnd 封顶（有效期不超过分钟预报本身的覆盖终点）。
+    static ExpirationInterval = 5 * 60;
+    static ClearExpirationInterval = 60 * 60;
 
     static #Configs = {
         Pollutants: {
@@ -402,6 +401,12 @@ export default class ForecastNextHour {
         } else if (precipitationIntensity > Range.NO[0] && precipitationIntensity <= Range.NO[1]) {
             // 轻微降水，可能感知不到
             perceivedPrecipitationIntensity = 0; // 轻微降水通常感知不到
+        } else if (units === "mmph" && precipitationIntensity > Range.NO[1]) {
+            // 苹果原厂实测幂曲线（波特兰/里士满 WK3 抓包全部非零点拟合）：
+            // perceived ≈ 1.045 × intensity^0.392，钳制在 [0.1, 3.0]。
+            // 旧线性分段把 0.33 mm/h 压成 0.168（原厂 0.676）、0.90 压成 0.320（原厂 1.003）。
+            // <= 0.08 mm/h 已在上方 NO 段返回 0，本分支只处理有效降水。
+            perceivedPrecipitationIntensity = Math.min(3, Math.max(0.1, Number((1.045 * (precipitationIntensity ** 0.392)).toFixed(3))));
         } else if (precipitationIntensity > Range.LIGHT[0] && precipitationIntensity <= Range.LIGHT[1]) {
             // 小雨，可以感知到；把 LIGHT 段映射到苹果天气可见区间 [0.1, 1.0]。
             // 旧的 [0, 1] 线性缩放会把 0.08–0.419mm/h 的有效小雨压进不可见区间（< 0.1），
