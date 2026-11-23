@@ -215,7 +215,7 @@ export default class ColorfulClouds {
         }
 
         const request = {
-            url: `${this.endpoint}/realtime?lang=${this.language}&alert=true`,
+            url: `${this.endpoint}/realtime?lang=${this.language}&unit=metric:v2&alert=true`,
             headers: this.headers,
         };
         try {
@@ -299,8 +299,7 @@ export default class ColorfulClouds {
                                 const normalized = isPercentScale ? value : value * 100;
                                 return Math.min(100, Math.max(0, Math.round(normalized)));
                             });
-                            let minuteStemp = new Date(body?.server_time * 1000).setSeconds(0, 0);
-                            minuteStemp = minuteStemp.valueOf() / 1000 - 60;
+                            const minuteStemp = Math.floor((body?.server_time ?? timeStamp) / 60) * 60;
                             forecastNextHour = {
                                 metadata: metadata,
                                 condition: [],
@@ -321,11 +320,12 @@ export default class ColorfulClouds {
                                 }),
                                 summary: [],
                             };
+                            forecastNextHour.metadata.reportedTime = minuteStemp;
                             forecastNextHour.minutes.length = Math.min(85, forecastNextHour.minutes.length);
                             forecastNextHour.forecastEnd = minuteStemp + 60 * forecastNextHour.minutes.length;
                             forecastNextHour.minutes = ForecastNextHour.Minute(forecastNextHour.minutes, body?.result?.minutely?.description, "mmph");
                             forecastNextHour.summary = ForecastNextHour.Summary(forecastNextHour.minutes, this.version);
-                            forecastNextHour.condition = ForecastNextHour.Condition(forecastNextHour.summary);
+                            forecastNextHour.condition = ForecastNextHour.Condition(forecastNextHour.summary, this.version);
                             // 苹果原厂动态两档有效期：summary 含有效降水（clear === false）时 300 秒，
                             // 全程无降水时 3600 秒；有效期不超过分钟预报本身的覆盖终点
                             //（短数据时收紧，空数据时不回拨过期时间）。
@@ -430,7 +430,7 @@ export default class ColorfulClouds {
     async #Hourly(hourlysteps = 273, begin = undefined) {
         Console.info("☑️ Hourly", `hourlysteps: ${hourlysteps}`, `begin: ${begin}`);
         const request = {
-            url: `${this.endpoint}/hourly?hourlysteps=${hourlysteps}&lang=${this.language}`,
+            url: `${this.endpoint}/hourly?hourlysteps=${hourlysteps}&unit=metric:v2&lang=${this.language}`,
             headers: this.headers,
         };
         if (begin) request.url += `&begin=${begin}`;
@@ -788,6 +788,7 @@ export default class ColorfulClouds {
             };
         }
 
+        const precipitationIntensity = Math.trunc((realtime.result.realtime.precipitation?.local?.intensity ?? 0) * 1000000) / 1000000;
         Console.info("✅ CurrentWeather");
         return {
             metadata: this.#Metadata(realtime.result.server_time, realtime.location, false, 5 * 60),
@@ -795,7 +796,8 @@ export default class ColorfulClouds {
             ...Weather.ConvertWeatherCodeField(realtime.result.realtime.skycon),
             humidity: Math.round(realtime.result.realtime.humidity * 100),
             // uvIndex: Weather.ConvertDSWRF(body?.result?.realtime?.dswrf), // ConvertDSWRF 转换不准确
-            perceivedPrecipitationIntensity: realtime.result.realtime.precipitation.local.intensity,
+            precipitationIntensity: precipitationIntensity,
+            perceivedPrecipitationIntensity: ForecastNextHour.ConvertPrecipitationIntensity(precipitationIntensity, "mmph"),
             pressure: realtime.result.realtime.pressure / 100,
             temperature: realtime.result.realtime.temperature,
             temperatureApparent: realtime.result.realtime.apparent_temperature,

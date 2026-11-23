@@ -833,7 +833,7 @@ export default class QWeather {
                     forecastNextHour.forecastEnd = minuteStemp + 60 * forecastNextHour.minutes.length;
                     forecastNextHour.minutes = ForecastNextHour.Minute(forecastNextHour.minutes, body?.summary, "mmph");
                     forecastNextHour.summary = ForecastNextHour.Summary(forecastNextHour.minutes, this.version);
-                    forecastNextHour.condition = ForecastNextHour.Condition(forecastNextHour.summary);
+                    forecastNextHour.condition = ForecastNextHour.Condition(forecastNextHour.summary, this.version);
                     // 苹果原厂动态两档有效期：summary 含有效降水（clear === false）时 300 秒，
                     // 全程无降水时 3600 秒；有效期不超过分钟预报本身的覆盖终点
                     //（短数据时收紧，空数据时不回拨过期时间）。

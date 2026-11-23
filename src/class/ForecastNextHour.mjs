@@ -120,7 +120,7 @@ export default class ForecastNextHour {
         minutes = minutes.map((minute, i) => {
             // 根据precipitationIntensity来猜测生成perceivedPrecipitationIntensity
             minute.precipitationIntensity = Math.trunc(minute.precipitationIntensity * 1000000) / 1000000;
-            minute.perceivedPrecipitationIntensity = ForecastNextHour.#ConvertPrecipitationIntensity(minute.precipitationIntensity, units);
+            minute.perceivedPrecipitationIntensity = ForecastNextHour.ConvertPrecipitationIntensity(minute.precipitationIntensity, units);
             // 然后根据perceivedPrecipitationIntensity和precipitationChance来猜测生成condition和summaryCondition
             if (minute.perceivedPrecipitationIntensity > 2) {
                 // 大雨，强烈感知
@@ -243,7 +243,11 @@ export default class ForecastNextHour {
                     Summary.clear = minute.clear;
                     break;
                 case Length - 1: // 最后一个
-                    Summary.endTime = 0; // ⚠️空值必须写零！
+                    if (version === "v3") {
+                        delete Summary.endTime;
+                    } else {
+                        Summary.endTime = 0; // ⚠️WK2 空值写零，WK3 开放式末段省略 endTime
+                    }
                     //Summary.endCondition = minute.condition;
                     Summary.clear = minute.clear;
                     Console.debug(`Summaries[${i}]`, JSON.stringify({ ...minute, ...Summary }, null, 2));
@@ -289,7 +293,7 @@ export default class ForecastNextHour {
         return Summaries;
     }
 
-    static Condition(summaries = []) {
+    static Condition(summaries = [], version = "v2") {
         Console.info("☑️ Condition");
         const Conditions = [];
         if (!summaries.length) {
@@ -322,7 +326,7 @@ export default class ForecastNextHour {
                         forecastToken: "CLEAR",
                         parameters: [],
                         startTime: current.startTime,
-                        endTime: 0,
+                        ...(version === "v3" ? {} : { endTime: 0 }),
                     });
                 } else if (afterNext) {
                     Conditions.push({
@@ -353,7 +357,7 @@ export default class ForecastNextHour {
                     forecastToken: "CONSTANT",
                     parameters: [],
                     startTime: current.startTime,
-                    endTime: 0,
+                    ...(version === "v3" ? {} : { endTime: 0 }),
                 });
             } else if (afterNext) {
                 Conditions.push({
@@ -389,7 +393,7 @@ export default class ForecastNextHour {
         return safeConditions;
     }
 
-    static #ConvertPrecipitationIntensity(precipitationIntensity, units = "mmph") {
+    static ConvertPrecipitationIntensity(precipitationIntensity, units = "mmph") {
         //Console.info("☑️ ConvertPrecipitationIntensity");
         //Console.debug(`precipitationIntensity: ${precipitationIntensity}`, `units: ${units}`);
         const Range = ForecastNextHour.#Configs.Precipitation.Range[units];

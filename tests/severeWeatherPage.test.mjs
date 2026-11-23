@@ -566,7 +566,7 @@ test("ColorfulClouds reuses its realtime cache and standardizes v2.6 alerts", as
             await colorfulClouds.CurrentWeather();
             extracted = await colorfulClouds.WeatherAlert();
 
-            assert.equal(sourceRequest.url.toString(), `https://api.caiyunapp.com/v2.6/test-token/116.3176,39.976/realtime?lang=${colorfulCloudsLanguage}&alert=true`);
+            assert.equal(sourceRequest.url.toString(), `https://api.caiyunapp.com/v2.6/test-token/116.3176,39.976/realtime?lang=${colorfulCloudsLanguage}&unit=metric:v2&alert=true`);
             assert.equal(sourceRequest.headers.get("Referer"), "https://caiyunapp.com/");
             assert.equal(requestCount, index + 1);
         }
@@ -1041,7 +1041,7 @@ test("the request scripts route coordinate identifiers through configured Colorf
             });
             const body = JSON.parse($response.body);
 
-            assert.equal(sourceUrl.toString(), "https://api.caiyunapp.com/v2.6/colorful-token/118.814,32.115/realtime?lang=zh_CN&alert=true");
+            assert.equal(sourceUrl.toString(), "https://api.caiyunapp.com/v2.6/colorful-token/118.814,32.115/realtime?lang=zh_CN&unit=metric:v2&alert=true");
             assert.equal($response.status, 200);
             assert.equal($response.statusCode, 200);
             assert.equal($response.headers["Content-Type"], "application/json");
