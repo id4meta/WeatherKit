@@ -14,11 +14,6 @@ export default new Hono()
     .all("/:rest{.*}", async c => {
         let $request = await HonoWorkerAdapter.buildRequest(c.req);
         $request = HonoWorkerAdapter.buildArgument($request);
-        let waitUntil;
-        try {
-            waitUntil = typeof c.executionCtx?.waitUntil === "function" ? p => c.executionCtx.waitUntil(p) : undefined;
-        } catch {}
-        if (waitUntil) $request._waitUntil = waitUntil;
         let $response;
         ({ $request, $response } = await Request($request));
         switch (typeof $response) {
@@ -31,21 +26,10 @@ export default new Hono()
                         if (params.country === "CN") {
                             const { Settings } = setENV("iRingo", "WeatherKit", database);
                             if (Settings?.Weather?.Provider === "ColorfulClouds" || Settings?.NextHour?.Provider === "ColorfulClouds") {
-                                const cc = new ColorfulClouds(params, Settings?.API?.ColorfulClouds?.Token || "Y2FpeXVuX25vdGlmeQ==", waitUntil);
+                                const cc = new ColorfulClouds(params, Settings?.API?.ColorfulClouds?.Token || "Y2FpeXVuX25vdGlmeQ==");
                                 const ds = new Set(params.dataSets);
                                 if (ds.has("currentWeather") || ds.has("airQuality")) cc.prefetchRealTime();
                                 if (ds.has("forecastNextHour")) cc.prefetchMinutely();
-                                $request._prefetchedColorfulClouds = cc;
-                            }
-                        } else if (params.country === "HK" || params.country === "MO") {
-                            const { Settings } = setENV("iRingo", "WeatherKit", database);
-                            const ds = new Set(params.dataSets);
-                            if (
-                                ds.has("airQuality") &&
-                                (Settings?.AirQuality?.Current?.Pollutants?.Provider === "ColorfulClouds" || Settings?.AirQuality?.Current?.Index?.Provider === "ColorfulCloudsCN")
-                            ) {
-                                const cc = new ColorfulClouds(params, Settings?.API?.ColorfulClouds?.Token || "Y2FpeXVuX25vdGlmeQ==", waitUntil);
-                                cc.prefetchRealTime();
                                 $request._prefetchedColorfulClouds = cc;
                             }
                         }
@@ -64,5 +48,5 @@ export default new Hono()
     })
     .onError((e, c) => {
         console.error(e);
-        return c.text("Internal Server Error", 500);
+        return c.body(e.message, 500);
     });

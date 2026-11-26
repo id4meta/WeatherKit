@@ -468,25 +468,15 @@ export default class QWeather {
         };
     }
 
-    static #WithUpstreamTimeout(promise, ms = 4000) {
-        let timer;
-        const timeout = new Promise((_, reject) => {
-            timer = setTimeout(() => reject(new Error(`upstream fetch timed out after ${ms}ms`)), ms);
-        });
-        promise.catch(() => {});
-        return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
-    }
-
     /**
      * 抓取并提取 QWeather 灾害预警页面。
      * Fetch and extract a QWeather severe-weather page.
      * @param {string} identifier 地区标识 / Location identifier.
      * @param {string} language WeatherKit 语言 / WeatherKit language.
      * @param {Record<string, string | string[] | undefined>} requestHeaders 原请求头 / Original request headers.
-     * @param {Function} [waitUntil] 边缘缓存非阻塞写入回调（Cloudflare Workers executionCtx.waitUntil）/ Non-blocking cache-write callback.
      * @returns {Promise<{alerts: Array<object>, areaName: string, source: string}>} 来源集合 / Source collection.
      */
-    static async FetchWeatherAlertPage(identifier, language = "zh-CN", requestHeaders = {}, waitUntil) {
+    static async FetchWeatherAlertPage(identifier, language = "zh-CN", requestHeaders = {}) {
         const sourceUrl = QWeather.BuildWeatherAlertPageURL(identifier, language);
         const normalizedHeaders = Object.fromEntries(Object.entries(requestHeaders).map(([key, value]) => [key.toLowerCase(), value]));
         const sourceHeaders = {
@@ -497,27 +487,11 @@ export default class QWeather {
         if (normalizedHeaders["user-agent"]) sourceHeaders["User-Agent"] = normalizedHeaders["user-agent"];
 
         Console.info("☑️ QWeather.FetchWeatherAlertPage", `url: ${sourceUrl}`, `language: ${language}`);
-        const cacheKey = `https://cache.internal/qweather/alert-page/${encodeURIComponent(identifier)}?lang=${encodeURIComponent(language)}`;
-        const cache = globalThis.caches?.default;
-        if (cache) {
-            try {
-                const cached = await cache.match(new Request(cacheKey, { method: "GET" }));
-                if (cached) {
-                    const parsed = await cached.json();
-                    if (parsed && Array.isArray(parsed.alerts)) {
-                        Console.info("✅ QWeather.FetchWeatherAlertPage", "Using cache");
-                        return parsed;
-                    }
-                }
-            } catch {}
-        }
-        const sourceResponse = await QWeather.#WithUpstreamTimeout(
-            fetch({
-                url: sourceUrl.toString(),
-                headers: sourceHeaders,
-                "auto-cookie": false,
-            }),
-        );
+        const sourceResponse = await fetch({
+            url: sourceUrl.toString(),
+            headers: sourceHeaders,
+            "auto-cookie": false,
+        });
         const contentType = sourceResponse.headers?.["Content-Type"] ?? sourceResponse.headers?.["content-type"] ?? "";
         Console.info("QWeather.FetchWeatherAlertPage", `status: ${sourceResponse.statusCode ?? sourceResponse.status}`, `contentType: ${contentType || "undefined"}`);
         if (!sourceResponse.ok) {
@@ -536,7 +510,7 @@ export default class QWeather {
         const extracted = QWeather.ExtractWeatherAlertPage(html);
         Console.info("✅ QWeather.FetchWeatherAlertPage", `alerts: ${extracted.alerts.length}`, `source: ${extracted.source}`);
         const areaId = identifier.match(/-(\d+)$/)?.[1];
-        const result = {
+        return {
             ...extracted,
             alerts: extracted.alerts.map(alert => ({
                 ...alert,
@@ -544,23 +518,6 @@ export default class QWeather {
                 ...(extracted.areaName && !alert.areaName ? { areaName: extracted.areaName } : {}),
             })),
         };
-        if (cache && Array.isArray(result.alerts)) {
-            try {
-                const cacheResp = new Response(JSON.stringify(result), {
-                    headers: {
-                        "Content-Type": "application/json; charset=utf-8",
-                        "Cache-Control": "public, max-age=180",
-                    },
-                });
-                const cacheReq = new Request(cacheKey, { method: "GET" });
-                if (typeof waitUntil === "function") {
-                    waitUntil(cache.put(cacheReq, cacheResp).catch(() => {}));
-                } else {
-                    await cache.put(cacheReq, cacheResp);
-                }
-            } catch {}
-        }
-        return result;
     }
 
     async GeoAPI(path = "city/lookup") {

@@ -11,14 +11,13 @@ const scaleFinite = (value, factor = 1, round = false) => {
 };
 
 export default class ColorfulClouds {
-    constructor(parameters, token, waitUntil) {
+    constructor(parameters, token) {
         this.Name = "ColorfulClouds";
         this.Version = "4.3.0";
         Console.log(`🟧 ${this.Name} v${this.Version}`);
         this.endpoint = `https://api.caiyunapp.com/v2.6/${token}/${parameters.longitude},${parameters.latitude}`;
         this.headers = { Referer: "https://caiyunapp.com/" };
         this.token = token;
-        this.waitUntil = typeof waitUntil === "function" ? waitUntil : undefined;
         this.version = parameters.version;
         this.language =
             this.#Config.Language[
@@ -156,20 +155,11 @@ export default class ColorfulClouds {
         return `https://cache.internal/caiyun/v2.6/${kind}/${lonKey},${latKey}?lang=${encodeURIComponent(this.language)}${suffix}`;
     }
 
-    #WithUpstreamTimeout(promise, ms = 4000) {
-        let timer;
-        const timeout = new Promise((_, reject) => {
-            timer = setTimeout(() => reject(new Error(`upstream fetch timed out after ${ms}ms`)), ms);
-        });
-        promise.catch(() => {});
-        return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
-    }
-
     async #FetchJsonWithEdgeCache(cacheKey, ttlSeconds, fetcher, subfield = "") {
         const isCacheable = body => body?.status === "ok" && (!subfield || body?.result?.[subfield]?.status === "ok");
         const cache = globalThis.caches?.default;
         if (!cache || !cacheKey || !(ttlSeconds > 0)) {
-            return this.#WithUpstreamTimeout(fetcher());
+            return fetcher();
         }
         const cacheReq = new Request(cacheKey, { method: "GET" });
         try {
@@ -182,7 +172,7 @@ export default class ColorfulClouds {
             }
         } catch {}
 
-        const body = await this.#WithUpstreamTimeout(fetcher());
+        const body = await fetcher();
         if (isCacheable(body)) {
             try {
                 const cacheResp = new Response(JSON.stringify(body), {
@@ -191,11 +181,7 @@ export default class ColorfulClouds {
                         "Cache-Control": `public, max-age=${ttlSeconds}`,
                     },
                 });
-                if (typeof this.waitUntil === "function") {
-                    this.waitUntil(cache.put(cacheReq, cacheResp).catch(() => {}));
-                } else {
-                    await cache.put(cacheReq, cacheResp);
-                }
+                await cache.put(cacheReq, cacheResp);
             } catch {}
         }
         return body;
@@ -221,7 +207,7 @@ export default class ColorfulClouds {
             try {
                 const body = await this.#FetchJsonWithEdgeCache(
                     this.#BuildCacheKey("realtime", "", 3),
-                    120,
+                    60,
                     () => fetch(request).then(response => JSON.parse(response?.body ?? "{}")),
                     "realtime",
                 );
@@ -283,7 +269,7 @@ export default class ColorfulClouds {
             try {
                 const body = await this.#FetchJsonWithEdgeCache(
                     this.#BuildCacheKey("minutely", "", 3),
-                    120,
+                    60,
                     () => fetch(request).then(response => JSON.parse(response?.body ?? "{}")),
                     "minutely",
                 );
@@ -501,7 +487,7 @@ export default class ColorfulClouds {
             const beginHour = hasBegin ? Math.floor(Number(begin) / 3600) * 3600 : undefined;
             const extraQuery = beginHour !== undefined ? `steps=${hourlysteps}&begin=${beginHour}` : `steps=${hourlysteps}`;
             const isYesterdayQuery = hasBegin && Number(hourlysteps) <= 24;
-            const ttlSeconds = isYesterdayQuery ? 1800 : 600;
+            const ttlSeconds = isYesterdayQuery ? 1800 : 300;
             const cacheKey = this.#BuildCacheKey("hourly", extraQuery, 2);
             const body = await this.#FetchJsonWithEdgeCache(
                 cacheKey,
@@ -551,7 +537,7 @@ export default class ColorfulClouds {
             const cacheKey = this.#BuildCacheKey("daily", extraQuery, 2);
             const body = await this.#FetchJsonWithEdgeCache(
                 cacheKey,
-                1200,
+                600,
                 fetchDaily,
                 "daily",
             );
