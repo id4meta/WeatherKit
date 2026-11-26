@@ -201,7 +201,7 @@ test("QWeather HTML extraction is separated from WeatherAlert construction", asy
     assert.match(alerts[0].id, /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     assert.equal(alerts[0].areaId, "101190110");
     assert.equal(alerts[0].areaName, "建邺");
-    assert.equal(alerts[0].attributionURL, "https://www.qweather.com/severe-weather/jianye-101190110.html");
+    assert.equal(alerts[0].attributionURL, "");
     assert.equal(alerts[0].countryCode, "CN");
     assert.equal(alerts[0].description, "雷暴橙色预警");
     assert.equal(alerts[0].effectiveTime, "2026-07-31T03:00:00.000Z");
@@ -898,7 +898,7 @@ test("Pages routes WeatherAlert requests through Hono before fetching QWeather",
             assert.equal(response.headers.get("Cache-Control"), "max-age=0", pathname);
             assert.equal(sourceRequest.url.toString(), "https://www.qweather.com/severe-weather/jianye-101190110.html?from=AppleWeatherService", pathname);
             assert.equal(body.length, 1, pathname);
-            assert.equal(body[0].attributionURL, "https://www.qweather.com/severe-weather/jianye-101190110.html", pathname);
+            assert.equal(body[0].attributionURL, "", pathname);
             assert.equal(body[0].description, "雷暴橙色预警", pathname);
             assert.equal(body[0].eventSource, "CN", pathname);
             assert.equal(body[0].reportedAt, "2026-07-31T03:00:00.000Z", pathname);
@@ -993,7 +993,7 @@ test("the request scripts return QWeather data before Apple weatherAlerts is req
             assert.equal($response.status, 200);
             assert.equal($response.statusCode, 200);
             assert.equal($response.headers["Content-Type"], "application/json");
-            assert.equal(body[0].attributionURL, "https://www.qweather.com/en/severe-weather/jianye-101190110.html");
+            assert.equal(body[0].attributionURL, "");
             assert.equal(body[0].eventSource, "CN");
             assert.equal(body[0].reportedAt, "2026-07-31T03:00:00.000Z");
             assert.equal(body[0].source, "建邺区气象台");
@@ -1129,7 +1129,7 @@ test("the request scripts route coordinate identifiers through configured Colorf
             assert.equal($response.status, 200);
             assert.equal($response.statusCode, 200);
             assert.equal($response.headers["Content-Type"], "application/json");
-            assert.equal(body[0].attributionURL, "https://developer.apple.com/weatherkit/data-source-attribution/");
+            assert.equal(body[0].attributionURL, "");
             assert.equal(body[0].description, "大风蓝色预警");
             assert.equal(body[0].source, "国家预警信息发布中心");
         }
