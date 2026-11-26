@@ -156,6 +156,21 @@ test("request serves custom AQHI scales locally after stripping their versions",
     }
 });
 
+test("request caches static AQHI scale responses per language and scale", async t => {
+    const build = t.mock.method(AirQualityScale.prototype, "Build", function (language, scaleName) {
+        return { status: 200, headers: { "Content-Type": "application/json; charset=utf-8" }, body: JSON.stringify({ name: scaleName, language }) };
+    });
+    const url = "https://weatherkit.apple.com/api/v1/airQualityScale/zh-Hant-TW/CN.AQHI.2414";
+    const first = await Request({ headers: {}, method: "GET", url });
+    const second = await Request({ headers: {}, method: "GET", url });
+    assert.equal(first.$response.status, 200);
+    assert.equal(second.$response, first.$response, "second request must reuse the cached scale response object");
+    assert.equal(build.mock.callCount(), 1, "AirQualityScale.Build must run once per language:scale");
+    const other = await Request({ headers: {}, method: "GET", url: "https://weatherkit.apple.com/api/v1/airQualityScale/zh-Hant-TW/HK.AQHI.2414" });
+    assert.notEqual(other.$response, first.$response, "a different language:scale must build its own response");
+    assert.equal(build.mock.callCount(), 2);
+});
+
 test("request leaves unsupported custom-scale languages to Apple", async () => {
     for (const handler of [Request, RequestDev]) {
         const { $request, $response } = await handler({

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { beforeEach } from "node:test";
 import ColorfulClouds from "../src/class/ColorfulClouds.mjs";
+
+beforeEach(() => ColorfulClouds.clearL1Cache());
 
 function hourlyResponse(probabilities) {
     const hours = probabilities.map((probability, index) => ({
@@ -121,21 +123,20 @@ function realtimeAirQualityResponse() {
     };
 }
 
-test("CurrentAirQuality uses Caiyun for HK and MO", async () => {
+test("CurrentAirQuality skips HK and MO without fetching", async () => {
     const originalFetch = globalThis.fetch;
     let fetchCalls = 0;
     globalThis.fetch = async () => {
         fetchCalls++;
-        return new Response(JSON.stringify(realtimeAirQualityResponse()));
+        throw new Error("fetch must not be called for unsupported AirQuality countries");
     };
     try {
         for (const country of ["HK", "MO"]) {
             const colorfulClouds = new ColorfulClouds({ country, language: "zh-CN", latitude: "22.54", longitude: "114.06" }, "test-token");
             const result = await colorfulClouds.CurrentAirQuality();
-            assert.equal(result.index, 87);
-            assert.equal(result.metadata.temporarilyUnavailable, false);
+            assert.equal(result.metadata.temporarilyUnavailable, true);
         }
-        assert.equal(fetchCalls, 2);
+        assert.equal(fetchCalls, 0);
     } finally {
         globalThis.fetch = originalFetch;
     }

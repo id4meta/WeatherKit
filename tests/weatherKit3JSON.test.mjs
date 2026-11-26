@@ -5,9 +5,10 @@ globalThis.$environment = { "surge-version": "test" };
 globalThis.$persistentStore = { read: () => null, write: () => true };
 globalThis.$argument = { LogLevel: "OFF", Storage: "Argument" };
 
-const [{ Response }, { default: WeatherKit3 }, { default: ColorfulClouds }, { default: QWeather }, { FlatBufferRootProcessor }] = await Promise.all([
+const [{ Response }, { default: WeatherKit3 }, { default: WeatherKit2 }, { default: ColorfulClouds }, { default: QWeather }, { FlatBufferRootProcessor }] = await Promise.all([
     import("../src/process/Response.dev.mjs"),
     import("../src/class/WeatherKit3.mjs"),
+    import("../src/class/WeatherKit2.mjs"),
     import("../src/class/ColorfulClouds.mjs"),
     import("../src/class/QWeather.mjs"),
     import("@nsnanocat/flatbuffer-root"),
@@ -180,4 +181,86 @@ test("malformed/error/oversized JSON responses are returned untouched without pr
         { ...response(), body: " ".repeat(4 * 1024 * 1024 + 1) },
     ];
     for (const input of cases) assert.equal(await Response(request(), input), input);
+});
+
+test("non-CN v3 JSON request passes Apple through without provider calls", async t => {
+    t.mock.method(ColorfulClouds.prototype, "CurrentWeather", async () => assert.fail("non-CN must not call the Caiyun provider"));
+    t.mock.method(QWeather.prototype, "WeatherNow", async () => assert.fail("non-CN must not call the QWeather provider"));
+    const input = response();
+    const req = request("currentWeather");
+    req.url = "https://weatherkit.apple.com/api/v3/weather/zh-Hans/25.03/121.56?country=TW&dataSets=currentWeather";
+    const output = await Response(req, input);
+    assert.equal(output, input, "non-CN JSON must return the Apple response object untouched");
+    assert.equal(JSON.parse(output.body).currentWeather.temperature, 20);
+});
+
+test("non-CN v3 binary request skips decodeWithReport and passes bytes through untouched", async t => {
+    t.mock.method(WeatherKit3, "decodeWithReport", () => assert.fail("non-CN must not enter the FlatBuffer decoder"));
+    t.mock.method(WeatherKit3, "encode", () => assert.fail("non-CN must not enter the FlatBuffer encoder"));
+    const inputBytes = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]);
+    const input = { status: 200, headers: { "Content-Type": "application/vnd.apple.flatbuffer" }, bodyBytes: inputBytes };
+    const req = {
+        method: "GET",
+        headers: { "User-Agent": "WeatherKit_Weather_macOS_Version_27.3", accept: "application/vnd.apple.flatbuffer" },
+        url: "https://weatherkit.apple.com/api/v3/weather/zh-Hans/25.03/121.56?country=TW&dataSets=currentWeather",
+    };
+    const output = await Response(req, input);
+    assert.equal(output, input, "non-CN binary must return the Apple response object untouched");
+    assert.deepEqual(output.body, inputBytes, "non-CN binary body must pass through byte-identical");
+    assert.equal(output.bodyBytes, inputBytes);
+});
+
+test("non-CN v2 binary request skips decode and passes bytes through untouched", async t => {
+    t.mock.method(WeatherKit2, "decode", () => assert.fail("non-CN must not enter the FlatBuffer decoder"));
+    t.mock.method(WeatherKit2, "encode", () => assert.fail("non-CN must not enter the FlatBuffer encoder"));
+    const inputBytes = new Uint8Array([9, 8, 7, 6, 5, 4, 3, 2]);
+    const input = { status: 200, headers: { "Content-Type": "application/vnd.apple.flatbuffer" }, bodyBytes: inputBytes };
+    const req = {
+        method: "GET",
+        headers: { "User-Agent": "WeatherKit_Weather_macOS_Version_27.3", accept: "application/vnd.apple.flatbuffer" },
+        url: "https://weatherkit.apple.com/api/v2/weather/zh-Hans/25.03/121.56?country=TW&dataSets=currentWeather",
+    };
+    const output = await Response(req, input);
+    assert.equal(output, input, "non-CN binary must return the Apple response object untouched");
+    assert.deepEqual(output.body, inputBytes, "non-CN binary body must pass through byte-identical");
+    assert.equal(output.bodyBytes, inputBytes);
+});
+
+test("WARN-level CN request does not instantiate MatchEnum, QWeather or WAQI", async t => {
+    globalThis.$argument.LogLevel = "WARN";
+    t.mock.method(ColorfulClouds.prototype, "CurrentWeather", async () => ({ metadata: { providerName: "彩云天气" }, temperature: 27 }));
+    const seen = [];
+    const originalLog = console.log;
+    console.log = (...args) => {
+        seen.push(args.join(" "));
+    };
+    try {
+        const output = await Response(request("currentWeather"), response());
+        assert.equal(JSON.parse(output.body).currentWeather.temperature, 27);
+    } finally {
+        console.log = originalLog;
+    }
+    assert.ok(seen.some(line => line.includes("ColorfulClouds")), `ColorfulClouds must still construct eagerly, got ${JSON.stringify(seen)}`);
+    assert.equal(seen.some(line => line.includes("MatchEnum")), false, `MatchEnum must not instantiate below DEBUG, got ${JSON.stringify(seen)}`);
+    assert.equal(seen.some(line => line.includes("QWeather")), false, `QWeather must stay lazy for a pure-Caiyun request, got ${JSON.stringify(seen)}`);
+    assert.equal(seen.some(line => line.includes("WAQI")), false, `WAQI must stay lazy for a pure-Caiyun request, got ${JSON.stringify(seen)}`);
+});
+
+test("Response reuses $request._wkContext instead of re-parsing the request URL", async t => {
+    t.mock.method(ColorfulClouds.prototype, "CurrentWeather", async () => ({ metadata: { providerName: "彩云天气" }, temperature: 27 }));
+    const { Request } = await import("../src/process/Request.mjs");
+    const { $request } = await Request(request("currentWeather"));
+    assert.ok($request._wkContext, "Request must mount _wkContext on the request");
+    assert.equal($request._wkContext.country, "CN");
+    $request.url = $request.url.replace("country=CN", "country=TW");
+    const output = JSON.parse((await Response($request, response())).body);
+    assert.equal(output.currentWeather.temperature, 27, "injection must still run from the mounted CN context after the URL was rewritten to TW");
+});
+
+test("direct Response() without _wkContext still injects CN weather", async t => {
+    t.mock.method(ColorfulClouds.prototype, "CurrentWeather", async () => ({ metadata: { providerName: "彩云天气" }, temperature: 27 }));
+    const req = request("currentWeather");
+    assert.equal(req._wkContext, undefined, "plain request carries no _wkContext");
+    const output = JSON.parse((await Response(req, response())).body);
+    assert.equal(output.currentWeather.temperature, 27);
 });

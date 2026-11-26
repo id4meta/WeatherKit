@@ -30,7 +30,8 @@ export async function Response($request, $response) {
      * 设置
      * @type {{Settings: import('./types').Settings}}
      */
-    const { Settings, Caches, Configs } = setENV("iRingo", "WeatherKit", database);
+    const _wkContext = $request?._wkContext;
+    const { Settings, Caches, Configs } = _wkContext?.env ?? setENV("iRingo", "WeatherKit", database);
     Console.logLevel = Settings.LogLevel;
     // 创建空数据
     let body = {};
@@ -93,17 +94,21 @@ export async function Response($request, $response) {
                         default:
                             if (url.pathname.startsWith("/api/v3/weather/")) {
                                 Console.info("🟪 WeatherKit.api.v3.weather (JSON)");
-                                const parameters = parseWeatherKitURL(url);
-                                parameters.country = resolveCountryForResponse(url, parameters);
+                                const parameters = _wkContext?.parameters ?? parseWeatherKitURL(url);
+                                parameters.country = _wkContext?.country ?? resolveCountryForResponse(url, parameters);
                                 const dataSets = parameters.dataSets.filter(dataSet => Settings.DataSets.includes(dataSet) && ["airQuality", "currentWeather", "forecastDaily", "forecastHourly", "forecastNextHour", "weatherAlerts"].includes(dataSet));
                                 let changed = false;
-                                if (dataSets.length > 0) {
+                                if (parameters.country === "CN" && dataSets.length > 0) {
                                     // REST JSON 表示沿用标量形状，供应商按标量产出 / REST JSON uses scalar shapes, so providers produce scalars.
                                     const providerParameters = { ...parameters, version: "v2", weatherKitLanguage: body.weatherAlerts?.metadata?.language };
                                     const enviroments = {
                                         colorfulClouds: $request?._prefetchedColorfulClouds ?? new ColorfulClouds(providerParameters, Settings?.API?.ColorfulClouds?.Token || "Y2FpeXVuX25vdGlmeQ=="),
-                                        qWeather: new QWeather(providerParameters, Settings?.API?.QWeather?.Token || "bdd98ec1d87747f3a2e8b1741a5af796", Settings?.API?.QWeather?.Host),
-                                        waqi: new WAQI(parameters, Settings?.API?.WAQI?.Token),
+                                        get qWeather() {
+                                            return (this._qWeather ??= new QWeather(providerParameters, Settings?.API?.QWeather?.Token || "bdd98ec1d87747f3a2e8b1741a5af796", Settings?.API?.QWeather?.Host));
+                                        },
+                                        get waqi() {
+                                            return (this._waqi ??= new WAQI(parameters, Settings?.API?.WAQI?.Token));
+                                        },
                                         country: parameters.country,
                                     };
                                     const replaceWeather = async (name, inject) => {
@@ -200,20 +205,26 @@ export async function Response($request, $response) {
                             switch (true) {
                                 case url.pathname.startsWith("/api/v2/weather/"): {
                                     Console.info("🟦 WeatherKit.api.v2.weather");
-                                    const parameters = parseWeatherKitURL(url);
-                                    parameters.country = resolveCountryForResponse(url, parameters);
+                                    const parameters = _wkContext?.parameters ?? parseWeatherKitURL(url);
+                                    parameters.country = _wkContext?.country ?? resolveCountryForResponse(url, parameters);
+                                    if (parameters.country !== "CN") break;
                                     const dataSets = parameters.dataSets.filter(dataSet => Settings.DataSets.includes(dataSet));
                                     const rootNames = dataSets.map(dataSet => Configs.DataSets[dataSet] ?? dataSet);
                                     body = WeatherKit2.decode(ByteBuffer, rootNames);
                                     const providerParameters = { ...parameters, weatherKitLanguage: body.weatherAlerts?.metadata?.language };
-                                    const matchEnum = new MatchEnum(body, parameters.version, $request);
+                                    let matchEnum;
                                     if (Settings?.LogLevel === "DEBUG" || Settings?.LogLevel === "ALL") {
+                                        matchEnum = new MatchEnum(body, parameters.version, $request);
                                         await matchEnum.init();
                                     }
                                     const enviroments = {
                                         colorfulClouds: $request?._prefetchedColorfulClouds ?? new ColorfulClouds(providerParameters, Settings?.API?.ColorfulClouds?.Token || "Y2FpeXVuX25vdGlmeQ=="),
-                                        qWeather: new QWeather(providerParameters, Settings?.API?.QWeather?.Token || "bdd98ec1d87747f3a2e8b1741a5af796", Settings?.API?.QWeather?.Host),
-                                        waqi: new WAQI(parameters, Settings?.API?.WAQI?.Token),
+                                        get qWeather() {
+                                            return (this._qWeather ??= new QWeather(providerParameters, Settings?.API?.QWeather?.Token || "bdd98ec1d87747f3a2e8b1741a5af796", Settings?.API?.QWeather?.Host));
+                                        },
+                                        get waqi() {
+                                            return (this._waqi ??= new WAQI(parameters, Settings?.API?.WAQI?.Token));
+                                        },
                                         country: parameters.country,
                                     };
 
@@ -288,11 +299,12 @@ export async function Response($request, $response) {
                                 }
                                 case url.pathname.startsWith("/api/v3/weather/"): {
                                     Console.info("🟪 WeatherKit.api.v3.weather");
-                                    const parameters = parseWeatherKitURL(url);
-                                    parameters.country = resolveCountryForResponse(url, parameters);
+                                    const parameters = _wkContext?.parameters ?? parseWeatherKitURL(url);
+                                    parameters.country = _wkContext?.country ?? resolveCountryForResponse(url, parameters);
                                     // 解码选中的可注入产品（注入用）与仅做归属清理的非注入产品（兜底清理用）；
                                     // 其余根产品保持原始 arena；解码失败的产品保留原始 arena，不参与注入与重写。
                                     const dataSets = parameters.dataSets.filter(dataSet => Settings.DataSets.includes(dataSet) && ["airQuality", "currentWeather", "forecastDaily", "forecastHourly", "forecastNextHour", "weatherAlerts"].includes(dataSet));
+                                    if (parameters.country !== "CN") break;
                                     const sweepDataSets =
                                         parameters.country === "CN"
                                             ? parameters.dataSets.filter(dataSet => ["dataNotice", "forecastPeriodic", "historicalComparisons", "weatherChanges", "news"].includes(dataSet))
@@ -305,14 +317,19 @@ export async function Response($request, $response) {
                                     // Products that fail to read or decode keep their original arenas and are neither injected nor rewritten.
                                     const failed = new Set(failures.map(failure => failure.name));
                                     const providerParameters = { ...parameters, weatherKitLanguage: body.weatherAlerts?.metadata?.language };
-                                    const matchEnum = new MatchEnum(body, parameters.version, $request);
+                                    let matchEnum;
                                     if (Settings?.LogLevel === "DEBUG" || Settings?.LogLevel === "ALL") {
+                                        matchEnum = new MatchEnum(body, parameters.version, $request);
                                         await matchEnum.init();
                                     }
                                     const enviroments = {
                                         colorfulClouds: $request?._prefetchedColorfulClouds ?? new ColorfulClouds(providerParameters, Settings?.API?.ColorfulClouds?.Token || "Y2FpeXVuX25vdGlmeQ=="),
-                                        qWeather: new QWeather(providerParameters, Settings?.API?.QWeather?.Token || "bdd98ec1d87747f3a2e8b1741a5af796", Settings?.API?.QWeather?.Host),
-                                        waqi: new WAQI(parameters, Settings?.API?.WAQI?.Token),
+                                        get qWeather() {
+                                            return (this._qWeather ??= new QWeather(providerParameters, Settings?.API?.QWeather?.Token || "bdd98ec1d87747f3a2e8b1741a5af796", Settings?.API?.QWeather?.Host));
+                                        },
+                                        get waqi() {
+                                            return (this._waqi ??= new WAQI(parameters, Settings?.API?.WAQI?.Token));
+                                        },
                                         country: parameters.country,
                                     };
                                     const patch = {};

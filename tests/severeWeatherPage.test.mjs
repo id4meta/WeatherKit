@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import test from "node:test";
+import test, { beforeEach } from "node:test";
 import { onRequest } from "../functions/[[route]].js";
 import ColorfulClouds from "../src/class/ColorfulClouds.mjs";
 import QWeather from "../src/class/QWeather.mjs";
@@ -136,6 +136,7 @@ const colorfulCloudsCAPAlertAPI = {
     ],
 };
 
+beforeEach(() => ColorfulClouds.clearL1Cache());
 test("Pages Functions only receive WeatherKit API routes", async () => {
     const routes = JSON.parse(await readFile(new URL("_routes.json", pagesDirectory), "utf8"));
     assert.deepEqual(routes, {
@@ -646,6 +647,7 @@ test("ColorfulClouds reuses its realtime cache and standardizes v2.6 alerts", as
             ["ja", "ja"],
             ["de", "zh_CN"],
         ].entries()) {
+            ColorfulClouds.clearL1Cache();
             const colorfulClouds = new ColorfulClouds({ country: "CN", language: weatherKitLanguage, latitude: "39.976", longitude: "116.3176" }, "test-token");
             await colorfulClouds.CurrentWeather();
             extracted = await colorfulClouds.WeatherAlert();

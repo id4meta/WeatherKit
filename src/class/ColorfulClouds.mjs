@@ -10,7 +10,32 @@ const scaleFinite = (value, factor = 1, round = false) => {
     return round ? Math.round(scaled) : scaled;
 };
 
+// Isolate 进程内 L1 内存热缓存（模块级共享）：key 与 L2 #BuildCacheKey(...) 一致，
+// 存储 { body, cachedAt, softTtlMs, hardTtlMs }；命中时删除重插做轻量 LRU。
+const MAX_L1_ENTRIES = 64;
+const l1Cache = new Map();
+const swrInflight = new Set();
+const l1Get = cacheKey => {
+    const entry = l1Cache.get(cacheKey);
+    if (!entry) return undefined;
+    l1Cache.delete(cacheKey);
+    l1Cache.set(cacheKey, entry);
+    return entry;
+};
+const l1Set = (cacheKey, body, softTtlMs, hardTtlMs) => {
+    if (l1Cache.has(cacheKey)) l1Cache.delete(cacheKey);
+    l1Cache.set(cacheKey, { body, cachedAt: Date.now(), softTtlMs, hardTtlMs });
+    while (l1Cache.size > MAX_L1_ENTRIES) {
+        l1Cache.delete(l1Cache.keys().next().value);
+    }
+};
+
 export default class ColorfulClouds {
+    static clearL1Cache() {
+        // 只清 L1 条目：swrInflight 由后台刷新完成时的 finally 自行移除，清掉它会让一次正在进行的刷新失去去重标记。
+        l1Cache.clear();
+    }
+
     constructor(parameters, token, waitUntil) {
         this.Name = "ColorfulClouds";
         this.Version = "4.3.0";
@@ -146,7 +171,7 @@ export default class ColorfulClouds {
             Minutely: [
                 "CN",
             ],
-            AirQuality: ["CN", "HK", "MO"],
+            AirQuality: ["CN"],
         },
     };
 
@@ -177,6 +202,7 @@ export default class ColorfulClouds {
                 headers: {
                     "Content-Type": "application/json; charset=utf-8",
                     "Cache-Control": `public, max-age=${ttlSeconds}`,
+                    "X-Cached-At": String(Date.now()),
                 },
             });
             const putPromise = cache.put(new Request(cacheKey, { method: "GET" }), cacheResp).catch(() => {});
@@ -185,26 +211,67 @@ export default class ColorfulClouds {
         } catch {}
     }
 
-    async #FetchJsonWithEdgeCache(cacheKey, ttlSeconds, fetcher, subfield = "") {
-        const isCacheable = body => body?.status === "ok" && (!subfield || body?.result?.[subfield]?.status === "ok");
-        const cache = globalThis.caches?.default;
-        if (!cache || !cacheKey || !(ttlSeconds > 0)) {
-            return fetcher();
-        }
-        const cacheReq = new Request(cacheKey, { method: "GET" });
-        try {
-            const cached = await cache.match(cacheReq);
-            if (cached) {
-                const parsed = await cached.json();
-                if (isCacheable(parsed)) {
-                    return parsed;
+    #TriggerSwr(cacheKey, hardTtlSeconds, softTtlSeconds, fetcher, subfield) {
+        if (typeof this.waitUntil !== "function") return;
+        if (swrInflight.has(cacheKey)) return;
+        swrInflight.add(cacheKey);
+        this.waitUntil((async () => {
+            try {
+                const body = await fetcher();
+                if (body?.status === "ok" && (!subfield || body?.result?.[subfield]?.status === "ok")) {
+                    l1Set(cacheKey, body, softTtlSeconds * 1000, hardTtlSeconds * 1000);
+                    await this.#WriteEdgeCache(cacheKey, hardTtlSeconds, body);
                 }
+            } catch {} finally {
+                swrInflight.delete(cacheKey);
             }
-        } catch {}
+        })());
+    }
+
+    async #FetchJsonWithEdgeCache(cacheKey, hardTtlSeconds, fetcher, subfield = "", softTtlSeconds = hardTtlSeconds) {
+        const isCacheable = body => body?.status === "ok" && (!subfield || body?.result?.[subfield]?.status === "ok");
+        const hardTtlMs = hardTtlSeconds * 1000;
+        const softTtlMs = softTtlSeconds * 1000;
+        // L1 内存命中：软过期内直接返回；软硬之间返回旧值并后台 SWR 刷新；超硬过期删除后回源。
+        const l1Entry = l1Get(cacheKey);
+        if (l1Entry) {
+            const age = Date.now() - l1Entry.cachedAt;
+            if (age < l1Entry.softTtlMs) return l1Entry.body;
+            if (age < l1Entry.hardTtlMs && l1Entry.softTtlMs < l1Entry.hardTtlMs) {
+                this.#TriggerSwr(cacheKey, hardTtlSeconds, softTtlSeconds, fetcher, subfield);
+                return l1Entry.body;
+            }
+            l1Cache.delete(cacheKey);
+        }
+        const cache = globalThis.caches?.default;
+        if (cache && cacheKey && hardTtlSeconds > 0) {
+            const cacheReq = new Request(cacheKey, { method: "GET" });
+            try {
+                const cached = await cache.match(cacheReq);
+                if (cached) {
+                    const parsed = await cached.json();
+                    if (isCacheable(parsed)) {
+                        const cachedAtHeader = cached.headers?.get?.("X-Cached-At");
+                        const cachedAt = cachedAtHeader === null || cachedAtHeader === undefined ? NaN : Number(cachedAtHeader);
+                        const age = Number.isFinite(cachedAt) ? Date.now() - cachedAt : 0;
+                        if (age < softTtlMs) {
+                            l1Set(cacheKey, parsed, softTtlMs, hardTtlMs);
+                            return parsed;
+                        }
+                        if (age < hardTtlMs && softTtlMs < hardTtlMs) {
+                            l1Set(cacheKey, parsed, softTtlMs, hardTtlMs);
+                            this.#TriggerSwr(cacheKey, hardTtlSeconds, softTtlSeconds, fetcher, subfield);
+                            return parsed;
+                        }
+                    }
+                }
+            } catch {}
+        }
 
         const body = await fetcher();
         if (isCacheable(body)) {
-            await this.#WriteEdgeCache(cacheKey, ttlSeconds, body);
+            l1Set(cacheKey, body, softTtlMs, hardTtlMs);
+            await this.#WriteEdgeCache(cacheKey, hardTtlSeconds, body);
         }
         return body;
     }
@@ -237,7 +304,7 @@ export default class ColorfulClouds {
         this.#inflight.realtime = (async () => {
             try {
                 const body = await this.#FetchJsonWithEdgeCache(
-                    this.#BuildCacheKey("realtime", "", 3),
+                    this.#BuildCacheKey("realtime", "", 2),
                     120,
                     () => this.#FetchWithTimeout(request).then(response => JSON.parse(response?.body ?? "{}")),
                     "realtime",
@@ -308,7 +375,7 @@ export default class ColorfulClouds {
         this.#inflight.minutely = (async () => {
             try {
                 const body = await this.#FetchJsonWithEdgeCache(
-                    this.#BuildCacheKey("minutely", "", 3),
+                    this.#BuildCacheKey("minutely", "", 2),
                     120,
                     () => this.#FetchWithTimeout(request).then(response => JSON.parse(response?.body ?? "{}")),
                     "minutely",
@@ -352,6 +419,57 @@ export default class ColorfulClouds {
         return this.#FetchMinutely().catch(() => undefined);
     }
 
+    #HourlyRequest(hourlysteps, begin) {
+        const request = {
+            url: `${this.endpoint}/hourly?hourlysteps=${hourlysteps}&unit=metric:v2&lang=${this.language}`,
+            headers: this.headers,
+        };
+        if (begin) request.url += `&begin=${begin}`;
+        return request;
+    }
+
+    #DailyRequest(dailysteps, begin) {
+        const request = {
+            url: `${this.endpoint}/daily?dailysteps=${dailysteps}&unit=metric:v2&lang=${this.language}`,
+            headers: this.headers,
+        };
+        if (begin) request.url += `&begin=${begin}`;
+        return request;
+    }
+
+    // prefetchWeather 预检：L1 → L2，年龄未超 hardTtlMs 即复用；软过期时触发后台 SWR 刷新。
+    async #PrefetchKindCheck(kind, cacheKey, softTtlMs, hardTtlMs, swrFetcher) {
+        const entry = l1Get(cacheKey);
+        if (entry) {
+            const age = Date.now() - entry.cachedAt;
+            if (age < entry.hardTtlMs) {
+                if (age >= entry.softTtlMs) this.#TriggerSwr(cacheKey, entry.hardTtlMs / 1000, entry.softTtlMs / 1000, swrFetcher, kind);
+                return entry.body;
+            }
+            l1Cache.delete(cacheKey);
+        }
+        const cache = globalThis.caches?.default;
+        if (cache) {
+            try {
+                const hit = await cache.match(new Request(cacheKey, { method: "GET" }));
+                if (hit) {
+                    const parsed = await hit.json();
+                    if (parsed?.status === "ok" && parsed?.result?.[kind]?.status === "ok") {
+                        const cachedAtHeader = hit.headers?.get?.("X-Cached-At");
+                        const cachedAt = cachedAtHeader === null || cachedAtHeader === undefined ? NaN : Number(cachedAtHeader);
+                        const age = Number.isFinite(cachedAt) ? Date.now() - cachedAt : 0;
+                        if (age < hardTtlMs) {
+                            l1Set(cacheKey, parsed, softTtlMs, hardTtlMs);
+                            if (age >= softTtlMs) this.#TriggerSwr(cacheKey, hardTtlMs / 1000, softTtlMs / 1000, swrFetcher, kind);
+                            return parsed;
+                        }
+                    }
+                }
+            } catch {}
+        }
+        return null;
+    }
+
     #HourlyCacheHit(hourlysteps, begin) {
         const cached = this.#cache.hourly;
         if (cached?.status !== "ok" || cached?.result?.hourly?.status !== "ok") return false;
@@ -386,36 +504,23 @@ export default class ColorfulClouds {
         if (this.#inflight.weather) return this.#inflight.weather;
         const hasBegin = begin !== undefined && begin !== null && Number.isFinite(Number(begin));
         const beginHour = hasBegin ? Math.floor(Number(begin) / 3600) * 3600 : undefined;
-        const cache = globalThis.caches?.default;
         let hourlyCached = null;
         let dailyCached = null;
-        if (cache && (needHourly || needDaily)) {
+        if (needHourly || needDaily) {
             const checks = [];
             if (needHourly) {
                 checks.push(
                     (async () => {
-                        try {
-                            const key = this.#BuildCacheKey("hourly", beginHour !== undefined ? `steps=273&begin=${beginHour}` : "steps=273", 2);
-                            const hit = await cache.match(new Request(key, { method: "GET" }));
-                            if (hit) {
-                                const parsed = await hit.json();
-                                if (parsed?.status === "ok" && parsed?.result?.hourly?.status === "ok") hourlyCached = parsed;
-                            }
-                        } catch {}
+                        const key = this.#BuildCacheKey("hourly", beginHour !== undefined ? `steps=273&begin=${beginHour}` : "steps=273", 2);
+                        hourlyCached = await this.#PrefetchKindCheck("hourly", key, 600 * 1000, 1800 * 1000, () => this.#FetchWithTimeout(this.#HourlyRequest(273, begin)).then(response => JSON.parse(response?.body ?? "{}")));
                     })(),
                 );
             }
             if (needDaily) {
                 checks.push(
                     (async () => {
-                        try {
-                            const key = this.#BuildCacheKey("daily", beginHour !== undefined ? `steps=11&begin=${beginHour}` : "steps=11", 2);
-                            const hit = await cache.match(new Request(key, { method: "GET" }));
-                            if (hit) {
-                                const parsed = await hit.json();
-                                if (parsed?.status === "ok" && parsed?.result?.daily?.status === "ok") dailyCached = parsed;
-                            }
-                        } catch {}
+                        const key = this.#BuildCacheKey("daily", beginHour !== undefined ? `steps=11&begin=${beginHour}` : "steps=11", 2);
+                        dailyCached = await this.#PrefetchKindCheck("daily", key, 1200 * 1000, 3600 * 1000, () => this.#FetchWithTimeout(this.#DailyRequest(11, begin)).then(response => JSON.parse(response?.body ?? "{}")));
                     })(),
                 );
             }
@@ -448,19 +553,27 @@ export default class ColorfulClouds {
                             this.#cache.alert = body.result.alert;
                             break;
                     }
-                    await this.#WriteEdgeCache(this.#BuildCacheKey("realtime", "", 3), 120, this.#cache.realtime);
+                    const realtimeKey = this.#BuildCacheKey("realtime", "", 2);
+                    l1Set(realtimeKey, this.#cache.realtime, 120 * 1000, 120 * 1000);
+                    await this.#WriteEdgeCache(realtimeKey, 120, this.#cache.realtime);
                 }
                 if (body?.result?.minutely?.status === "ok") {
                     this.#cache.minutely = { status: "ok", server_time: serverTime, location, result: { minutely: body.result.minutely } };
-                    await this.#WriteEdgeCache(this.#BuildCacheKey("minutely", "", 3), 120, this.#cache.minutely);
+                    const minutelyKey = this.#BuildCacheKey("minutely", "", 2);
+                    l1Set(minutelyKey, this.#cache.minutely, 120 * 1000, 120 * 1000);
+                    await this.#WriteEdgeCache(minutelyKey, 120, this.#cache.minutely);
                 }
                 if (body?.result?.hourly?.status === "ok") {
                     this.#cache.hourly = { status: "ok", server_time: serverTime, location, result: { hourly: body.result.hourly } };
-                    await this.#WriteEdgeCache(this.#BuildCacheKey("hourly", beginHour !== undefined ? `steps=273&begin=${beginHour}` : "steps=273", 2), 600, this.#cache.hourly);
+                    const hourlyKey = this.#BuildCacheKey("hourly", beginHour !== undefined ? `steps=273&begin=${beginHour}` : "steps=273", 2);
+                    l1Set(hourlyKey, this.#cache.hourly, 600 * 1000, 1800 * 1000);
+                    await this.#WriteEdgeCache(hourlyKey, 1800, this.#cache.hourly);
                 }
                 if (body?.result?.daily?.status === "ok") {
                     this.#cache.daily = { status: "ok", server_time: serverTime, location, result: { daily: body.result.daily } };
-                    await this.#WriteEdgeCache(this.#BuildCacheKey("daily", beginHour !== undefined ? `steps=11&begin=${beginHour}` : "steps=11", 2), 1200, this.#cache.daily);
+                    const dailyKey = this.#BuildCacheKey("daily", beginHour !== undefined ? `steps=11&begin=${beginHour}` : "steps=11", 2);
+                    l1Set(dailyKey, this.#cache.daily, 1200 * 1000, 3600 * 1000);
+                    await this.#WriteEdgeCache(dailyKey, 3600, this.#cache.daily);
                 }
                 Console.info("✅ prefetchWeather");
                 return body;
@@ -507,7 +620,7 @@ export default class ColorfulClouds {
                             // 数组内若存在 > 1 的值则按 0–100 百分比直取，否则按 0–1 小数乘 100，并统一钳制在 [0, 100] 防 FlatBuffer uint8 溢出。
                             const rawProbability = Array.isArray(body?.result?.minutely?.probability) ? body.result.minutely.probability : [];
                             const isPercentScale = this.#IsPercentProbabilityScale(rawProbability);
-                            body.result.minutely.probability = rawProbability.map(probability => this.#NormalizeProbability(probability, isPercentScale));
+                            const normalizedProbability = rawProbability.map(probability => this.#NormalizeProbability(probability, isPercentScale));
                             const minuteStemp = Math.floor((body?.server_time ?? timeStamp) / 60) * 60;
                             forecastNextHour = {
                                 metadata: metadata,
@@ -521,10 +634,10 @@ export default class ColorfulClouds {
                                         precipitationIntensity: precipitationIntensity,
                                         startTime: minuteStemp + 60 * index,
                                     };
-                                    if (index < 30) minute.precipitationChance = body?.result?.minutely?.probability?.[0];
-                                    else if (index < 60) minute.precipitationChance = body?.result?.minutely?.probability?.[1];
-                                    else if (index < 90) minute.precipitationChance = body?.result?.minutely?.probability?.[2];
-                                    else minute.precipitationChance = body?.result?.minutely?.probability?.[3];
+                                    if (index < 30) minute.precipitationChance = normalizedProbability[0];
+                                    else if (index < 60) minute.precipitationChance = normalizedProbability[1];
+                                    else if (index < 90) minute.precipitationChance = normalizedProbability[2];
+                                    else minute.precipitationChance = normalizedProbability[3];
                                     return minute;
                                 }),
                                 summary: [],
@@ -651,24 +764,22 @@ export default class ColorfulClouds {
                 return this.#cache.hourly;
             }
         }
-        const request = {
-            url: `${this.endpoint}/hourly?hourlysteps=${hourlysteps}&unit=metric:v2&lang=${this.language}`,
-            headers: this.headers,
-        };
-        if (begin) request.url += `&begin=${begin}`;
+        const request = this.#HourlyRequest(hourlysteps, begin);
         try {
             const fetchHourly = () => this.#FetchWithTimeout(request).then(response => JSON.parse(response?.body ?? "{}"));
             const hasBegin = begin !== undefined && begin !== null && Number.isFinite(Number(begin));
             const beginHour = hasBegin ? Math.floor(Number(begin) / 3600) * 3600 : undefined;
             const extraQuery = beginHour !== undefined ? `steps=${hourlysteps}&begin=${beginHour}` : `steps=${hourlysteps}`;
             const isYesterdayQuery = hasBegin && Number(hourlysteps) <= 24;
-            const ttlSeconds = isYesterdayQuery ? 1800 : 600;
+            const hardTtlSeconds = 1800;
+            const softTtlSeconds = isYesterdayQuery ? 1800 : 600;
             const cacheKey = this.#BuildCacheKey("hourly", extraQuery, 2);
             const body = await this.#FetchJsonWithEdgeCache(
                 cacheKey,
-                ttlSeconds,
+                hardTtlSeconds,
                 fetchHourly,
                 "hourly",
+                softTtlSeconds,
             );
             switch (body?.status) {
                 case "ok":
@@ -704,7 +815,7 @@ export default class ColorfulClouds {
         const dayCount = Math.min(dailysteps, Array.isArray(body?.result?.daily?.skycon) ? body.result.daily.skycon.length : 0);
         const days = [];
         for (let i = 0; i < dayCount; i++) {
-            const timeStamp = (new Date(body?.result?.daily?.skycon?.[i]?.date).getTime() / 1000) | 0;
+            const timeStamp = (Date.parse(body?.result?.daily?.skycon?.[i]?.date) / 1000) | 0;
             days.push({
                 forecastStart: timeStamp,
                 forecastEnd: timeStamp + 24 * 3600, // 24 hours
@@ -827,11 +938,7 @@ export default class ColorfulClouds {
                 return this.#DailyFromCache(dailysteps);
             }
         }
-        const request = {
-            url: `${this.endpoint}/daily?dailysteps=${dailysteps}&unit=metric:v2&lang=${this.language}`,
-            headers: this.headers,
-        };
-        if (begin) request.url += `&begin=${begin}`;
+        const request = this.#DailyRequest(dailysteps, begin);
         let forecastDaily;
         try {
             const fetchDaily = () => this.#FetchWithTimeout(request).then(response => JSON.parse(response?.body ?? "{}"));
@@ -841,9 +948,10 @@ export default class ColorfulClouds {
             const cacheKey = this.#BuildCacheKey("daily", extraQuery, 2);
             const body = await this.#FetchJsonWithEdgeCache(
                 cacheKey,
-                1200,
+                3600,
                 fetchDaily,
                 "daily",
+                1200,
             );
             switch (body?.status) {
                 case "ok":
@@ -1172,7 +1280,7 @@ export default class ColorfulClouds {
                 // cloudCoverMidAltPct: 0, // Not given
                 ...Weather.ConvertWeatherCodeField(hourly.result.hourly.skycon[i].value),
                 // daylight: false, // Not given
-                forecastStart: (new Date(hourly.result.hourly.skycon[i].datetime).getTime() / 1000) | 0,
+                forecastStart: (Date.parse(hourly.result.hourly.skycon[i].datetime) / 1000) | 0,
                 humidity: scaleFinite(hourly.result.hourly.humidity?.[i]?.value, 100, true),
                 // perceivedPrecipitationIntensity: "", // Not given
                 precipitationAmount: hourly.result.hourly.precipitation[i]?.value,

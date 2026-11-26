@@ -155,7 +155,7 @@ test("onError returns a generic Internal Server Error without leaking the cause"
     }
 });
 
-test("HK airQuality request prefetches realtime once and reuses it downstream", async () => {
+test("HK airQuality request triggers zero Caiyun prefetch and passes Apple through untouched", async () => {
     const originalFetch = globalThis.fetch;
     const originalCaches = globalThis.caches;
     globalThis.caches = undefined;
@@ -165,11 +165,8 @@ test("HK airQuality request prefetches realtime once and reuses it downstream", 
         const res = await app.request("https://weatherkit.test/api/v3/weather/zh-Hans/22.32/114.17?country=HK&dataSets=airQuality", { headers: { "User-Agent": "Weather/1.0" } });
         assert.equal(res.status, 200);
         const body = await res.json();
-        assert.ok(body.airQuality, "prefetched realtime data must flow into the airQuality dataset");
-        assert.ok(Array.isArray(body.airQuality.pollutants) && body.airQuality.pollutants.length > 0, `airQuality pollutants must be populated, got ${JSON.stringify(body.airQuality)}`);
-        const realtimeCalls = fetchCalls.filter(url => url.includes("/realtime?"));
-        assert.equal(realtimeCalls.length, 1, `exactly one /realtime fetch expected, got ${JSON.stringify(fetchCalls)}`);
-        assert.equal(fetchCalls.filter(url => url.includes("/weather?")).length, 0, "HK airQuality must not fetch the four-in-one /weather endpoint");
+        assert.equal(body.airQuality, undefined, `HK must pass Apple through without injected airQuality, got ${JSON.stringify(body.airQuality)}`);
+        assert.equal(fetchCalls.filter(url => url.includes("api.caiyunapp.com")).length, 0, `HK must not touch Caiyun, got ${JSON.stringify(fetchCalls)}`);
     } finally {
         globalThis.fetch = originalFetch;
         globalThis.caches = originalCaches;

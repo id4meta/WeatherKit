@@ -161,6 +161,7 @@ test("Caiyun hourly cloud-cover fractions are converted to percentages before ro
         [1, 100],
     ]) {
         colorfulCloudsHourly.result.hourly.cloudrate[0].value = fraction;
+        ColorfulClouds.clearL1Cache();
         const forecast = await new ColorfulClouds({ ...parameters, version: "v3" }, "token").ForecastHourly(1);
         assert.equal(forecast.hours[0].cloudCover, percent);
     }

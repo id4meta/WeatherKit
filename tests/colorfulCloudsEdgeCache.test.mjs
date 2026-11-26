@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { beforeEach } from "node:test";
 import ColorfulClouds from "../src/class/ColorfulClouds.mjs";
+
+beforeEach(() => ColorfulClouds.clearL1Cache());
 
 function realtimeResponse(temperature = 20, intensity = 0) {
     return {
@@ -85,7 +87,7 @@ test("Edge cache key never contains the token and stores max-age=120", async () 
         const result = await newInstance().CurrentWeather();
         assert.equal(result.temperature, 20);
         assert.equal(mockCache.putCalls.length, 1);
-        assert.equal(mockCache.putCalls[0].url, "https://cache.internal/caiyun/v2.6/realtime/114.060,22.540?lang=zh_CN");
+        assert.equal(mockCache.putCalls[0].url, "https://cache.internal/caiyun/v2.6/realtime/114.06,22.54?lang=zh_CN");
         assert.ok(!mockCache.putCalls[0].url.includes("test-token"), `cache key must not contain the token, got ${mockCache.putCalls[0].url}`);
         assert.ok(mockCache.putCalls[0].cacheControl.includes("max-age=120"), `Cache-Control must contain max-age=120, got ${mockCache.putCalls[0].cacheControl}`);
     } finally {
@@ -174,7 +176,7 @@ function dailyResponse() {
     };
 }
 
-test("Daily with begin hits the edge cache with max-age=1200", async () => {
+test("Daily with begin hits the edge cache with max-age=3600", async () => {
     const originalFetch = globalThis.fetch;
     const originalCaches = globalThis.caches;
     let fetchCalls = 0;
@@ -193,7 +195,7 @@ test("Daily with begin hits the edge cache with max-age=1200", async () => {
         assert.equal(mockCache.putCalls.length, 1);
         assert.equal(mockCache.putCalls[0].url, "https://cache.internal/caiyun/v2.6/daily/114.06,22.54?lang=zh_CN&steps=11&begin=1795449600");
         assert.ok(!mockCache.putCalls[0].url.includes("test-token"), `cache key must not contain the token, got ${mockCache.putCalls[0].url}`);
-        assert.ok(mockCache.putCalls[0].cacheControl.includes("max-age=1200"), `Cache-Control must contain max-age=1200, got ${mockCache.putCalls[0].cacheControl}`);
+        assert.ok(mockCache.putCalls[0].cacheControl.includes("max-age=3600"), `Cache-Control must contain max-age=3600, got ${mockCache.putCalls[0].cacheControl}`);
     } finally {
         globalThis.fetch = originalFetch;
         globalThis.caches = originalCaches;
@@ -233,7 +235,7 @@ function hourlyResponse273() {
     };
 }
 
-test("ForecastHourly with begin and 273 steps uses max-age=600", async () => {
+test("ForecastHourly with begin and 273 steps uses max-age=1800", async () => {
     const originalFetch = globalThis.fetch;
     const originalCaches = globalThis.caches;
     globalThis.fetch = async () => new Response(JSON.stringify(hourlyResponse273()));
@@ -243,8 +245,7 @@ test("ForecastHourly with begin and 273 steps uses max-age=600", async () => {
         const result = await newInstance().ForecastHourly(273, 1795449600);
         assert.equal(result.hours.length, 273);
         assert.equal(mockCache.putCalls.length, 1);
-        assert.ok(mockCache.putCalls[0].cacheControl.includes("max-age=600"), `Cache-Control must contain max-age=600, got ${mockCache.putCalls[0].cacheControl}`);
-        assert.ok(!mockCache.putCalls[0].cacheControl.includes("max-age=1800"), `Cache-Control must not contain max-age=1800, got ${mockCache.putCalls[0].cacheControl}`);
+        assert.ok(mockCache.putCalls[0].cacheControl.includes("max-age=1800"), `Cache-Control must contain max-age=1800, got ${mockCache.putCalls[0].cacheControl}`);
     } finally {
         globalThis.fetch = originalFetch;
         globalThis.caches = originalCaches;
@@ -392,10 +393,10 @@ test("prefetchWeather cold hit backfills 4 memory caches and 4 edge caches with 
         assert.ok(router.calls[0].includes("/weather?"), `expected a single /weather fetch, got ${router.calls[0]}`);
         assert.equal(mockCache.putCalls.length, 4);
         const byUrl = Object.fromEntries(mockCache.putCalls.map(call => [call.url, call.cacheControl]));
-        assert.ok(byUrl["https://cache.internal/caiyun/v2.6/realtime/114.060,22.540?lang=zh_CN"]?.includes("max-age=120"), `realtime put: ${JSON.stringify(mockCache.putCalls)}`);
-        assert.ok(byUrl["https://cache.internal/caiyun/v2.6/minutely/114.060,22.540?lang=zh_CN"]?.includes("max-age=120"), `minutely put: ${JSON.stringify(mockCache.putCalls)}`);
-        assert.ok(byUrl["https://cache.internal/caiyun/v2.6/hourly/114.06,22.54?lang=zh_CN&steps=273"]?.includes("max-age=600"), `hourly put: ${JSON.stringify(mockCache.putCalls)}`);
-        assert.ok(byUrl["https://cache.internal/caiyun/v2.6/daily/114.06,22.54?lang=zh_CN&steps=11"]?.includes("max-age=1200"), `daily put: ${JSON.stringify(mockCache.putCalls)}`);
+        assert.ok(byUrl["https://cache.internal/caiyun/v2.6/realtime/114.06,22.54?lang=zh_CN"]?.includes("max-age=120"), `realtime put: ${JSON.stringify(mockCache.putCalls)}`);
+        assert.ok(byUrl["https://cache.internal/caiyun/v2.6/minutely/114.06,22.54?lang=zh_CN"]?.includes("max-age=120"), `minutely put: ${JSON.stringify(mockCache.putCalls)}`);
+        assert.ok(byUrl["https://cache.internal/caiyun/v2.6/hourly/114.06,22.54?lang=zh_CN&steps=273"]?.includes("max-age=1800"), `hourly put: ${JSON.stringify(mockCache.putCalls)}`);
+        assert.ok(byUrl["https://cache.internal/caiyun/v2.6/daily/114.06,22.54?lang=zh_CN&steps=11"]?.includes("max-age=3600"), `daily put: ${JSON.stringify(mockCache.putCalls)}`);
         const current = await cc.CurrentWeather();
         assert.equal(current.temperature, 20);
         const minutely = await cc.Minutely();

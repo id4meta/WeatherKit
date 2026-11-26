@@ -206,8 +206,11 @@ export default class HonoWorkerAdapter {
         } else {
             const url = new URL($request.url);
             globalThis.$argument = url.search.slice(1);
-            [...url.searchParams.keys()].filter(k => /^[A-Z]/.test(k)).forEach(k => url.searchParams.delete(k));
-            $request.url = url.toString();
+            const argumentKeys = [...url.searchParams.keys()].filter(k => /^[A-Z]/.test(k));
+            if (argumentKeys.length > 0) {
+                argumentKeys.forEach(k => url.searchParams.delete(k));
+                $request.url = url.toString();
+            }
         }
         return $request;
     }

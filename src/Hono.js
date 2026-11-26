@@ -27,12 +27,14 @@ export default new Hono()
                 try {
                     const reqUrl = new URL($request.url);
                     if (reqUrl.pathname.startsWith("/api/v3/weather/") || reqUrl.pathname.startsWith("/api/v2/weather/")) {
-                        const params = parseWeatherKitURL(reqUrl);
-                        params.country = resolveCountryForResponse(reqUrl, params);
-                        const { Settings } = setENV("iRingo", "WeatherKit", database);
+                        const wkContext = $request._wkContext;
+                        const params = wkContext?.parameters ?? parseWeatherKitURL(reqUrl);
+                        const country = wkContext?.country ?? resolveCountryForResponse(reqUrl, params);
+                        params.country = country;
+                        const { Settings } = wkContext?.env ?? setENV("iRingo", "WeatherKit", database);
                         const token = Settings?.API?.ColorfulClouds?.Token || "Y2FpeXVuX25vdGlmeQ==";
                         const ds = new Set(params.dataSets);
-                        if (params.country === "CN") {
+                        if (country === "CN") {
                             if (Settings?.Weather?.Provider === "ColorfulClouds" || Settings?.NextHour?.Provider === "ColorfulClouds") {
                                 const cc = new ColorfulClouds(params, token, waitUntil);
                                 if ((ds.has("forecastHourly") || ds.has("forecastDaily")) && Settings?.Weather?.Provider === "ColorfulClouds") {
@@ -60,12 +62,6 @@ export default new Hono()
                                     if (ds.has("currentWeather") || ds.has("airQuality")) cc.prefetchRealTime();
                                     if (ds.has("forecastNextHour")) cc.prefetchMinutely();
                                 }
-                                $request._prefetchedColorfulClouds = cc;
-                            }
-                        } else if (params.country === "HK" || params.country === "MO") {
-                            if (ds.has("airQuality") && (Settings?.AirQuality?.Current?.Pollutants?.Provider === "ColorfulClouds" || Settings?.AirQuality?.Current?.Index?.Provider === "ColorfulCloudsCN")) {
-                                const cc = new ColorfulClouds(params, token, waitUntil);
-                                cc.prefetchRealTime();
                                 $request._prefetchedColorfulClouds = cc;
                             }
                         }

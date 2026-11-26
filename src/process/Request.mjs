@@ -7,6 +7,9 @@ import database from "../function/database.mjs";
 import parseWeatherKitURL from "../function/parseWeatherKitURL.mjs";
 import setENV from "../function/setENV.mjs";
 import { resolveCountryForResponse } from "./Response.mjs";
+
+// /api/v1/airQualityScale/ 静态构建响应缓存：key `${language}:${scaleName}`。
+const airQualityScaleCache = new Map();
 /***************** Processing *****************/
 export async function Request($request) {
     // 构造回复数据
@@ -22,7 +25,7 @@ export async function Request($request) {
      * 设置
      * @type {{Settings: import('./types').Settings}}
      */
-    const { Settings, Caches } = setENV("iRingo", "WeatherKit", database);
+    const { Settings, Caches, Configs } = setENV("iRingo", "WeatherKit", database);
     // 方法判断
     switch ($request.method) {
         case "POST":
@@ -107,9 +110,16 @@ export async function Request($request) {
                                         url.pathname = `/api/${version}/airQualityScale/${language}/${scaleName}`;
                                         switch (url.pathname) {
                                             case `/api/v1/airQualityScale/${language}/HK.AQHI`:
-                                            case `/api/v1/airQualityScale/${language}/CN.AQHI`:
-                                                $response = new AirQualityScale().Build(language, scaleName);
+                                            case `/api/v1/airQualityScale/${language}/CN.AQHI`: {
+                                                const scaleCacheKey = `${language}:${scaleName}`;
+                                                const cachedScale = airQualityScaleCache.get(scaleCacheKey);
+                                                if (cachedScale) $response = cachedScale;
+                                                else {
+                                                    $response = new AirQualityScale().Build(language, scaleName);
+                                                    if ($response) airQualityScaleCache.set(scaleCacheKey, $response);
+                                                }
                                                 break;
+                                            }
                                         }
                                     }
                                     break;
@@ -152,6 +162,13 @@ export async function Request($request) {
     }
     $request.url = url.toString();
     Console.debug(`$request.url: ${$request.url}`);
+    // 单请求上下文：供 Hono.js 预热与 Response() 复用 env/parameters/country，避免重复解析。
+    // country 为 country 改写后的最终值（发往苹果上游前的 URL 上由 resolveCountryForResponse 确定）。
+    $request._wkContext = {
+        env: { Settings, Caches, Configs },
+        parameters,
+        country: resolveCountryForResponse(url, parameters),
+    };
     return { $request, $response };
 }
 

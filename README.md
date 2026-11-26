@@ -17,7 +17,7 @@
 ### 2. 空气质量（`src/function/database.mjs`、`src/class/AirQuality.mjs`）
 
 - AQI 算法由 EU_EAQI 改为 WAQI_InstantCast_CN；指数源改为 ColorfulCloudsCN；污染物单位统一为 HJ6332012 并强制 µg/m³。
-- 港澳地区走彩云 AQI（CN、HK、MO），台湾地区保留 Apple 原厂数据；远洋坐标请求不传递 country 参数。
+- 仅中国大陆走彩云 AQI（CN）；港澳台与国外坐标全量直通 Apple 原厂数据，不再走彩云 AQI；远洋坐标请求不传递 country 参数。
 - 数值字段以 `scaleFinite` 守卫，避免 NaN 写入响应。
 
 ### 3. 第三方标识清理（`src/process/Response.mjs` 等）
@@ -43,13 +43,16 @@
 
 - `resolveCountryForResponse`：按收紧矩形判定港澳台；显式 country=CN 但坐标落在港澳台时改写为 HK/MO/TW；远洋坐标删除 country 参数。
 - 国家解析在请求阶段完成，早于数据拉取与预热。
+- 仅 country=CN 的请求进入彩云注入与重编码；港澳台与国外请求在 `/api/v3/weather/`（二进制与 JSON）及 `/api/v2/weather/` 分支中直接跳过解码、全部注入、元数据清理与重编码，零拷贝原样透传 Apple 原厂响应。
 
 ### 7. 性能与边缘缓存
 
-- 四合一预取：大陆完整请求（`forecastHourly` / `forecastDaily`）在请求阶段先发一次彩云 `/weather` 四合一接口，一次拉取实况、逐分钟、逐小时、逐日四路数据并回填内存与边缘缓存，下游不再重复请求；`begin` 由 `dailyStart` 或 `relativeDailyStart`（东八区当日 00:00 偏移）推导。半热命中时仅刷新未命中的路；港澳 airQuality 请求仅预热 realtime；台湾与国外请求零预热。
+- 四合一预取：仅中国大陆请求触发；大陆完整请求（`forecastHourly` / `forecastDaily`）在请求阶段先发一次彩云 `/weather` 四合一接口，一次拉取实况、逐分钟、逐小时、逐日四路数据并回填内存与边缘缓存，下游不再重复请求；`begin` 由 `dailyStart` 或 `relativeDailyStart`（东八区当日 00:00 偏移）推导。半热命中时仅刷新未命中的路；港澳台与国外请求零预热。
 - 流式 Gzip：响应体 ≥ 2048 字节且客户端支持 gzip 时压缩；204、304、HEAD 不压缩。
-- `replaceWeather` 脏检查改为元数据快速短路；非中国大陆请求不做数据集清扫（`sweepDataSets`）。
-- 彩云上游分层短缓存（`caches.default`）：realtime、minutely 120 秒；hourly 600 秒（昨日历史查询 1800 秒）；daily 1200 秒；读写均校验 status 为 ok。缓存写入经 Workers `waitUntil` 非阻塞，或无 `waitUntil` 时 await 写入。
+- `replaceWeather` 脏检查改为元数据快速短路；非中国大陆请求跳过全部注入与数据集清扫。
+- 彩云上游分层缓存（L1 进程内内存 + L2 `caches.default` 边缘）：读取顺序 L1 → L2 → 上游；L1 为有界 Map（上限 64 条，超限淘汰最早插入项，命中做轻量 LRU），读写 key 与 L2 一致；L2 写入附带 `X-Cached-At` 响应头用于计算缓存年龄。realtime、minutely 硬过期 120 秒，不做 SWR；hourly 软过期 600 秒、硬过期 1800 秒（昨日历史查询软硬均为 1800 秒）；daily 软过期 1200 秒、硬过期 3600 秒。软过期区间内立即返回旧值，并经 Workers `waitUntil` 后台静默刷新（同 key 去重）；超硬过期回源。读写均校验 status 为 ok；缓存写入经 `waitUntil` 非阻塞，或无 `waitUntil` 时 await 写入。坐标精度统一为 2 位小数。
+- 静态配置记忆化与单请求上下文：无 `$argument` 覆盖且无持久存储覆盖时，`setENV` 模块级缓存默认 Settings/Configs，每次返回浅拷贝外壳与全新的 `Caches: {}`；`Request` 把解析结果挂载为 `$request._wkContext`（含 env、parameters 与改写后最终 country），`Hono.js` 与 `Response` 优先复用，缺失时降级现算。`/api/v1/airQualityScale/` 的静态构建响应按语言与量表名缓存；`buildArgument` 仅在存在大写字母开头的查询参数键时才重写请求 URL。
+- 懒加载：`MatchEnum` 仅在日志级别为 DEBUG 或 ALL 时实例化；`enviroments` 的 `qWeather` 与 `waqi` 改为按需构造的 getter；`Date.parse()` 替代 `new Date(...).getTime()`。
 - 和风预警详情页 180 秒边缘缓存：仅 HTTP 200 且预警非空时写入，空结果绝不入缓存。
 - 上游超时保护：彩云与和风请求均设 4000 ms 超时，超时走既有 fail-closed 降级。
 - 错误脱敏：服务端 500 响应统一为 `Internal Server Error`，详细异常仅记入日志。
@@ -78,7 +81,7 @@
 ## 测试
 
 - 运行：`node --test tests/*.test.mjs`
-- 现状（2026-11-26）：208 项，162 通过、46 失败、0 跳过。46 项失败全部为缺真实协议编解码包所致（`@nsringo/weatherkit` 编解码包不在公开 npm registry），与业务代码无关；失败名录自建立基线以来无新增。
+- 现状（2026-11-27）：228 项，182 通过、46 失败、0 跳过。46 项失败全部为缺真实协议编解码包所致（`@nsringo/weatherkit` 编解码包不在公开 npm registry），与业务代码无关；失败名录自建立基线以来无新增。
 - `npm run build` 依赖 rollup，本地未安装时退出码 127，非代码错误。
 
 ## 已知限制
