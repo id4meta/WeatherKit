@@ -216,15 +216,7 @@ test("QWeather HTML extraction is separated from WeatherAlert construction", asy
     assert.deepEqual(alerts[0].messages, [
         {
             language: "zh-CN",
-            text: "预计午后将出现雷暴天气。",
-        },
-        {
-            language: "zh-CN",
-            text: "可能伴有短时强降水。",
-        },
-        {
-            language: "zh-CN",
-            text: "注意防范雷电。\n远离高大树木。",
+            text: "预计午后将出现雷暴天气。\n\n【预警标准】可能伴有短时强降水。\n\n【防御指南】\n\n1. 注意防范雷电。\n\n2. 远离高大树木。",
         },
     ]);
     assert.equal(
@@ -237,6 +229,90 @@ test("QWeather HTML extraction is separated from WeatherAlert construction", asy
         })[0].eventSource,
         "EUMETNET",
     );
+});
+
+test("WeatherAlerts.Build merges message, standard and guidelines into a single message", () => {
+    const alerts = WeatherAlerts.Build(
+        {
+            areaName: "测试区",
+            source: "测试气象台",
+            alerts: [
+                {
+                    description: "测试气象台发布暴雨黄色预警",
+                    eventName: "暴雨黄色预警",
+                    message: "预计未来6小时仍有强降水。",
+                    standard: "6小时内降雨量将达50毫米以上。",
+                    guidelines: ["注意防范城市内涝。", "远离低洼路段。"],
+                    severity: "moderate",
+                },
+            ],
+        },
+        { attributionUrl: new URL("https://example.com/alert"), identifier: "test-101", language: "zh-CN", countryCode: "CN" },
+    );
+
+    assert.equal(alerts[0].messages.length, 1);
+    assert.deepEqual(alerts[0].messages, [
+        {
+            language: "zh-CN",
+            text: "预计未来6小时仍有强降水。\n\n【预警标准】6小时内降雨量将达50毫米以上。\n\n【防御指南】\n\n1. 注意防范城市内涝。\n\n2. 远离低洼路段。",
+        },
+    ]);
+});
+
+test("WeatherAlerts.Build merges only standard and guidelines without a message", () => {
+    const alerts = WeatherAlerts.Build(
+        {
+            areaName: "Test Area",
+            source: "Test Weather Station",
+            alerts: [
+                {
+                    description: "Heat Advisory",
+                    eventName: "Heat Advisory",
+                    message: "",
+                    standard: "Temperatures may reach 37 degrees Celsius.",
+                    guidelines: ["Stay hydrated.", "Avoid outdoor activity at noon."],
+                    severity: "moderate",
+                },
+            ],
+        },
+        { attributionUrl: new URL("https://example.com/alert"), identifier: "test-102", language: "en-US", countryCode: "US" },
+    );
+
+    assert.equal(alerts[0].messages.length, 1);
+    assert.deepEqual(alerts[0].messages, [
+        {
+            language: "en-US",
+            text: "Standard: Temperatures may reach 37 degrees Celsius.\n\nPrecautions:\n\n1. Stay hydrated.\n\n2. Avoid outdoor activity at noon.",
+        },
+    ]);
+});
+
+test("WeatherAlerts.Build strips duplicate guideline numbers and renumbers", () => {
+    const alerts = WeatherAlerts.Build(
+        {
+            areaName: "测试区",
+            source: "测试气象台",
+            alerts: [
+                {
+                    description: "测试气象台发布大风蓝色预警",
+                    eventName: "大风蓝色预警",
+                    message: "预计今天夜间风力将加大。",
+                    standard: "",
+                    guidelines: ["1、注意防范大风。\n2. 远离高大树木。", "3）不要外出。", ""],
+                    severity: "minor",
+                },
+            ],
+        },
+        { attributionUrl: new URL("https://example.com/alert"), identifier: "test-103", language: "zh-CN", countryCode: "CN" },
+    );
+
+    assert.equal(alerts[0].messages.length, 1);
+    assert.deepEqual(alerts[0].messages, [
+        {
+            language: "zh-CN",
+            text: "预计今天夜间风力将加大。\n\n【防御指南】\n\n1. 注意防范大风。\n\n2. 远离高大树木。\n\n3. 不要外出。",
+        },
+    ]);
 });
 
 test("QWeather WeatherAlertWeb returns a complete top-level slot object", async () => {

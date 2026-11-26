@@ -363,11 +363,29 @@ export default class WeatherAlerts {
         const contextAreaId = context.identifier.match(/-(\d+)$/)?.[1];
         return extracted.alerts.map((alert, precedence) => {
             const uid = WeatherAlerts.#StableUUID(`${context.identifier}:${alert.identifier ?? precedence}`);
-            const messages = [];
-            for (const text of [alert.message, alert.standard, alert.guidelines?.filter(Boolean).join("\n")]) {
-                if (text) messages.push({ language: context.language, text });
+            const isChinese = /^zh/i.test(context.language);
+            const message = String(alert.message ?? "").trim();
+            const standard = String(alert.standard ?? "").trim();
+            const segments = [];
+            if (message) segments.push(message);
+            if (standard && standard !== message) segments.push(`${isChinese ? "【预警标准】" : "Standard: "}${standard}`);
+            const guidelineItems = [];
+            for (const guideline of alert.guidelines ?? []) {
+                for (const piece of String(guideline ?? "").split("\n")) {
+                    const cleaned = piece.replace(/^\s*\d+\s*[、.．)）]\s*/, "").trim();
+                    if (cleaned) guidelineItems.push(cleaned);
+                }
             }
-            if (!messages.length && alert.description) messages.push({ language: context.language, text: alert.description });
+            if (guidelineItems.length) {
+                const title = isChinese ? "【防御指南】" : "Precautions:";
+                segments.push([title, ...guidelineItems.map((item, index) => `${index + 1}. ${item}`)].join("\n\n"));
+            }
+            const messages = [];
+            if (segments.length) {
+                messages.push({ language: context.language, text: segments.join("\n\n") });
+            } else if (alert.description) {
+                messages.push({ language: context.language, text: alert.description });
+            }
             const responses = WeatherAlerts.#BuildResponses(alert.guidelines, alert.responses);
             const areaId = alert.areaId || contextAreaId;
             const areaName = alert.areaName || extracted.areaName;
