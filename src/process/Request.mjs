@@ -95,7 +95,7 @@ export async function Request($request) {
                     // 路径判断
                     switch (url.pathname) {
                         case "/api/v1/weatherAlerts": {
-                            $response = await GetWeatherAlerts(url.searchParams.get("ids")?.trim(), parameters, Settings, $request.headers);
+                            $response = await GetWeatherAlerts(url.searchParams.get("ids")?.trim(), parameters, Settings, $request.headers, $request._waitUntil);
                             break;
                         }
                         default:
@@ -161,15 +161,16 @@ export async function Request($request) {
  * @param {ReturnType<typeof parseWeatherKitURL>} parameters - WeatherKit 请求参数
  * @param {import('../types').Settings} Settings - 设置对象
  * @param {Record<string, string>} headers - 请求头
+ * @param {Function} [waitUntil] - 边缘缓存非阻塞写入回调（Cloudflare Workers executionCtx.waitUntil）
  * @returns {Promise<object>} 天气预警响应
  */
-async function GetWeatherAlerts(identifier, parameters, Settings, headers) {
+async function GetWeatherAlerts(identifier, parameters, Settings, headers, waitUntil) {
     let body = [];
     try {
         switch (true) {
             case /^[^&#]*-[0-9]{9}$/.test(identifier): {
                 Console.info("☑️ QWeather.FetchWeatherAlertPage", `ids: ${identifier}`);
-                const source = await QWeather.FetchWeatherAlertPage(identifier, parameters.language, headers);
+                const source = await QWeather.FetchWeatherAlertPage(identifier, parameters.language, headers, waitUntil);
                 body = WeatherAlerts.Build(source, {
                     attributionUrl: QWeather.BuildWeatherAlertPageURL(identifier, parameters.language, false),
                     identifier,
