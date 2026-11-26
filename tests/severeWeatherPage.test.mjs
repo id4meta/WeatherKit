@@ -201,7 +201,7 @@ test("QWeather HTML extraction is separated from WeatherAlert construction", asy
     assert.match(alerts[0].id, /^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     assert.equal(alerts[0].areaId, "101190110");
     assert.equal(alerts[0].areaName, "建邺");
-    assert.equal(alerts[0].attributionURL, "https://www.qweather.com/severe-weather/jianye-101190110.html");
+    assert.equal("attributionURL" in alerts[0], false);
     assert.equal(alerts[0].countryCode, "CN");
     assert.equal(alerts[0].description, "雷暴橙色预警");
     assert.equal(alerts[0].effectiveTime, "2026-07-31T03:00:00.000Z");
@@ -216,9 +216,10 @@ test("QWeather HTML extraction is separated from WeatherAlert construction", asy
     assert.deepEqual(alerts[0].messages, [
         {
             language: "zh-CN",
-            text: "预计午后将出现雷暴天气。\n\n【预警标准】可能伴有短时强降水。\n\n【防御指南】\n\n1. 注意防范雷电。\n\n2. 远离高大树木。",
+            text: "预计午后将出现雷暴天气。\n可能伴有短时强降水。\n注意防范雷电。\n远离高大树木。",
         },
     ]);
+    assert.equal(alerts[0].messages[0].text.includes("\n\n"), false);
     assert.equal(
         WeatherAlerts.Build(extracted, {
             attributionUrl,
@@ -251,12 +252,15 @@ test("WeatherAlerts.Build merges message, standard and guidelines into a single 
     );
 
     assert.equal(alerts[0].messages.length, 1);
+    assert.equal("attributionURL" in alerts[0], false);
     assert.deepEqual(alerts[0].messages, [
         {
             language: "zh-CN",
-            text: "预计未来6小时仍有强降水。\n\n【预警标准】6小时内降雨量将达50毫米以上。\n\n【防御指南】\n\n1. 注意防范城市内涝。\n\n2. 远离低洼路段。",
+            text: "预计未来6小时仍有强降水。\n6小时内降雨量将达50毫米以上。\n注意防范城市内涝。\n远离低洼路段。",
         },
     ]);
+    assert.equal(alerts[0].messages[0].text.includes("\n\n"), false);
+    assert.deepEqual(alerts[0].responses, ["prepare", "avoid"]);
 });
 
 test("WeatherAlerts.Build merges only standard and guidelines without a message", () => {
@@ -279,15 +283,18 @@ test("WeatherAlerts.Build merges only standard and guidelines without a message"
     );
 
     assert.equal(alerts[0].messages.length, 1);
+    assert.equal("attributionURL" in alerts[0], false);
     assert.deepEqual(alerts[0].messages, [
         {
             language: "en-US",
-            text: "Standard: Temperatures may reach 37 degrees Celsius.\n\nPrecautions:\n\n1. Stay hydrated.\n\n2. Avoid outdoor activity at noon.",
+            text: "Temperatures may reach 37 degrees Celsius.\nStay hydrated.\nAvoid outdoor activity at noon.",
         },
     ]);
+    assert.equal(alerts[0].messages[0].text.includes("\n\n"), false);
+    assert.deepEqual(alerts[0].responses, ["avoid"]);
 });
 
-test("WeatherAlerts.Build strips duplicate guideline numbers and renumbers", () => {
+test("WeatherAlerts.Build strips duplicate guideline numbers without renumbering", () => {
     const alerts = WeatherAlerts.Build(
         {
             areaName: "测试区",
@@ -307,12 +314,16 @@ test("WeatherAlerts.Build strips duplicate guideline numbers and renumbers", () 
     );
 
     assert.equal(alerts[0].messages.length, 1);
+    assert.equal("attributionURL" in alerts[0], false);
     assert.deepEqual(alerts[0].messages, [
         {
             language: "zh-CN",
-            text: "预计今天夜间风力将加大。\n\n【防御指南】\n\n1. 注意防范大风。\n\n2. 远离高大树木。\n\n3. 不要外出。",
+            text: "预计今天夜间风力将加大。\n注意防范大风。\n远离高大树木。\n不要外出。",
         },
     ]);
+    assert.equal(alerts[0].messages[0].text.includes("\n\n"), false);
+    assert.equal(/^\d+[.．、)）]/m.test(alerts[0].messages[0].text), false);
+    assert.deepEqual(alerts[0].responses, ["prepare", "avoid"]);
 });
 
 test("QWeather WeatherAlertWeb returns a complete top-level slot object", async () => {
@@ -890,7 +901,7 @@ test("Pages routes WeatherAlert requests through Hono before fetching QWeather",
             assert.equal(response.headers.get("Cache-Control"), "max-age=0", pathname);
             assert.equal(sourceRequest.url.toString(), "https://www.qweather.com/severe-weather/jianye-101190110.html?from=AppleWeatherService", pathname);
             assert.equal(body.length, 1, pathname);
-            assert.equal(body[0].attributionURL, "https://www.qweather.com/severe-weather/jianye-101190110.html", pathname);
+            assert.equal("attributionURL" in body[0], false, pathname);
             assert.equal(body[0].description, "雷暴橙色预警", pathname);
             assert.equal(body[0].eventSource, "CN", pathname);
             assert.equal(body[0].reportedAt, "2026-07-31T03:00:00.000Z", pathname);
@@ -985,7 +996,7 @@ test("the request scripts return QWeather data before Apple weatherAlerts is req
             assert.equal($response.status, 200);
             assert.equal($response.statusCode, 200);
             assert.equal($response.headers["Content-Type"], "application/json");
-            assert.equal(body[0].attributionURL, "https://www.qweather.com/en/severe-weather/jianye-101190110.html");
+            assert.equal("attributionURL" in body[0], false);
             assert.equal(body[0].eventSource, "CN");
             assert.equal(body[0].reportedAt, "2026-07-31T03:00:00.000Z");
             assert.equal(body[0].source, "建邺区气象台");
@@ -1121,7 +1132,7 @@ test("the request scripts route coordinate identifiers through configured Colorf
             assert.equal($response.status, 200);
             assert.equal($response.statusCode, 200);
             assert.equal($response.headers["Content-Type"], "application/json");
-            assert.equal(body[0].attributionURL, "https://developer.apple.com/weatherkit/data-source-attribution/");
+            assert.equal("attributionURL" in body[0], false);
             assert.equal(body[0].description, "大风蓝色预警");
             assert.equal(body[0].source, "国家预警信息发布中心");
         }

@@ -363,12 +363,11 @@ export default class WeatherAlerts {
         const contextAreaId = context.identifier.match(/-(\d+)$/)?.[1];
         return extracted.alerts.map((alert, precedence) => {
             const uid = WeatherAlerts.#StableUUID(`${context.identifier}:${alert.identifier ?? precedence}`);
-            const isChinese = /^zh/i.test(context.language);
             const message = String(alert.message ?? "").trim();
             const standard = String(alert.standard ?? "").trim();
             const segments = [];
             if (message) segments.push(message);
-            if (standard && standard !== message) segments.push(`${isChinese ? "【预警标准】" : "Standard: "}${standard}`);
+            if (standard && standard !== message) segments.push(standard);
             const guidelineItems = [];
             for (const guideline of alert.guidelines ?? []) {
                 for (const piece of String(guideline ?? "").split("\n")) {
@@ -376,13 +375,10 @@ export default class WeatherAlerts {
                     if (cleaned) guidelineItems.push(cleaned);
                 }
             }
-            if (guidelineItems.length) {
-                const title = isChinese ? "【防御指南】" : "Precautions:";
-                segments.push([title, ...guidelineItems.map((item, index) => `${index + 1}. ${item}`)].join("\n\n"));
-            }
+            if (guidelineItems.length) segments.push(guidelineItems.join("\n"));
             const messages = [];
             if (segments.length) {
-                messages.push({ language: context.language, text: segments.join("\n\n") });
+                messages.push({ language: context.language, text: segments.join("\n") });
             } else if (alert.description) {
                 messages.push({ language: context.language, text: alert.description });
             }
@@ -401,7 +397,6 @@ export default class WeatherAlerts {
                 id: uid,
                 ...(areaId ? { areaId } : {}),
                 ...(areaName ? { areaName } : {}),
-                attributionURL: context.attributionUrl.toString(),
                 certainty: alert.certainty || "unknown",
                 countryCode: context.countryCode ?? "",
                 description,
