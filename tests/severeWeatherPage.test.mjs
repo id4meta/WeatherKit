@@ -216,10 +216,10 @@ test("QWeather HTML extraction is separated from WeatherAlert construction", asy
     assert.deepEqual(alerts[0].messages, [
         {
             language: "zh-CN",
-            text: "预计午后将出现雷暴天气。\n可能伴有短时强降水。\n注意防范雷电。\n远离高大树木。",
+            text: "预计午后将出现雷暴天气。\n\n可能伴有短时强降水。\n\n注意防范雷电。\n远离高大树木。",
         },
     ]);
-    assert.equal(alerts[0].messages[0].text.includes("\n\n"), false);
+    assert.equal(alerts[0].messages[0].text.split("\n\n").length, 3);
     assert.equal(
         WeatherAlerts.Build(extracted, {
             attributionUrl,
@@ -255,10 +255,10 @@ test("WeatherAlerts.Build merges message, standard and guidelines into a single 
     assert.deepEqual(alerts[0].messages, [
         {
             language: "zh-CN",
-            text: "预计未来6小时仍有强降水。\n6小时内降雨量将达50毫米以上。\n注意防范城市内涝。\n远离低洼路段。",
+            text: "预计未来6小时仍有强降水。\n\n6小时内降雨量将达50毫米以上。\n\n注意防范城市内涝。\n远离低洼路段。",
         },
     ]);
-    assert.equal(alerts[0].messages[0].text.includes("\n\n"), false);
+    assert.equal(alerts[0].messages[0].text.split("\n\n").length, 3);
     assert.deepEqual(alerts[0].responses, ["prepare", "avoid"]);
 });
 
@@ -285,10 +285,10 @@ test("WeatherAlerts.Build merges only standard and guidelines without a message"
     assert.deepEqual(alerts[0].messages, [
         {
             language: "en-US",
-            text: "Temperatures may reach 37 degrees Celsius.\nStay hydrated.\nAvoid outdoor activity at noon.",
+            text: "Temperatures may reach 37 degrees Celsius.\n\nStay hydrated.\nAvoid outdoor activity at noon.",
         },
     ]);
-    assert.equal(alerts[0].messages[0].text.includes("\n\n"), false);
+    assert.equal(alerts[0].messages[0].text.split("\n\n").length, 2);
     assert.deepEqual(alerts[0].responses, ["avoid"]);
 });
 
@@ -315,10 +315,10 @@ test("WeatherAlerts.Build strips duplicate guideline numbers without renumbering
     assert.deepEqual(alerts[0].messages, [
         {
             language: "zh-CN",
-            text: "预计今天夜间风力将加大。\n注意防范大风。\n远离高大树木。\n不要外出。",
+            text: "预计今天夜间风力将加大。\n\n注意防范大风。\n远离高大树木。\n不要外出。",
         },
     ]);
-    assert.equal(alerts[0].messages[0].text.includes("\n\n"), false);
+    assert.equal(alerts[0].messages[0].text.split("\n\n").length, 2);
     assert.equal(/^\d+[.．、)）]/m.test(alerts[0].messages[0].text), false);
     assert.deepEqual(alerts[0].responses, ["prepare", "avoid"]);
 });

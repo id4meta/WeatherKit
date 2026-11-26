@@ -378,7 +378,7 @@ export default class WeatherAlerts {
             if (guidelineItems.length) segments.push(guidelineItems.join("\n"));
             const messages = [];
             if (segments.length) {
-                messages.push({ language: context.language, text: segments.join("\n") });
+                messages.push({ language: context.language, text: segments.join("\n\n") });
             } else if (alert.description) {
                 messages.push({ language: context.language, text: alert.description });
             }
