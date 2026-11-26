@@ -11,13 +11,14 @@ const scaleFinite = (value, factor = 1, round = false) => {
 };
 
 export default class ColorfulClouds {
-    constructor(parameters, token) {
+    constructor(parameters, token, waitUntil) {
         this.Name = "ColorfulClouds";
         this.Version = "4.3.0";
         Console.log(`🟧 ${this.Name} v${this.Version}`);
         this.endpoint = `https://api.caiyunapp.com/v2.6/${token}/${parameters.longitude},${parameters.latitude}`;
         this.headers = { Referer: "https://caiyunapp.com/" };
         this.token = token;
+        this.waitUntil = typeof waitUntil === "function" ? waitUntil : undefined;
         this.version = parameters.version;
         this.language =
             this.#Config.Language[
@@ -34,6 +35,9 @@ export default class ColorfulClouds {
     #cache = {
         alert: {},
         realtime: {},
+        minutely: {},
+        hourly: {},
+        daily: {},
     };
 
     #inflight = {};
@@ -155,6 +159,32 @@ export default class ColorfulClouds {
         return `https://cache.internal/caiyun/v2.6/${kind}/${lonKey},${latKey}?lang=${encodeURIComponent(this.language)}${suffix}`;
     }
 
+    #FetchWithTimeout(request, timeoutMs = 4000) {
+        let timeoutId;
+        const timeoutPromise = new Promise((_, reject) => {
+            timeoutId = setTimeout(() => reject(new Error("Upstream fetch timed out")), timeoutMs);
+        });
+        const fetchPromise = fetch(request);
+        fetchPromise.catch(() => {});
+        return Promise.race([fetchPromise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
+    }
+
+    async #WriteEdgeCache(cacheKey, ttlSeconds, body) {
+        const cache = globalThis.caches?.default;
+        if (!cache || !cacheKey || !(ttlSeconds > 0)) return;
+        try {
+            const cacheResp = new Response(JSON.stringify(body), {
+                headers: {
+                    "Content-Type": "application/json; charset=utf-8",
+                    "Cache-Control": `public, max-age=${ttlSeconds}`,
+                },
+            });
+            const putPromise = cache.put(new Request(cacheKey, { method: "GET" }), cacheResp).catch(() => {});
+            if (typeof this.waitUntil === "function") this.waitUntil(putPromise);
+            else await putPromise;
+        } catch {}
+    }
+
     async #FetchJsonWithEdgeCache(cacheKey, ttlSeconds, fetcher, subfield = "") {
         const isCacheable = body => body?.status === "ok" && (!subfield || body?.result?.[subfield]?.status === "ok");
         const cache = globalThis.caches?.default;
@@ -174,15 +204,7 @@ export default class ColorfulClouds {
 
         const body = await fetcher();
         if (isCacheable(body)) {
-            try {
-                const cacheResp = new Response(JSON.stringify(body), {
-                    headers: {
-                        "Content-Type": "application/json; charset=utf-8",
-                        "Cache-Control": `public, max-age=${ttlSeconds}`,
-                    },
-                });
-                await cache.put(cacheReq, cacheResp);
-            } catch {}
+            await this.#WriteEdgeCache(cacheKey, ttlSeconds, body);
         }
         return body;
     }
@@ -193,6 +215,15 @@ export default class ColorfulClouds {
         if (this.#cache.realtime?.result?.realtime?.status === "ok") {
             Console.info("✅ RealTime", "Using cache");
             return this.#cache.realtime;
+        }
+        if (this.#inflight.weather) {
+            try {
+                await this.#inflight.weather;
+            } catch {}
+            if (this.#cache.realtime?.result?.realtime?.status === "ok") {
+                Console.info("✅ RealTime", "Using cache");
+                return this.#cache.realtime;
+            }
         }
         if (this.#inflight.realtime) {
             Console.info("✅ RealTime", "Joining in-flight request");
@@ -207,8 +238,8 @@ export default class ColorfulClouds {
             try {
                 const body = await this.#FetchJsonWithEdgeCache(
                     this.#BuildCacheKey("realtime", "", 3),
-                    60,
-                    () => fetch(request).then(response => JSON.parse(response?.body ?? "{}")),
+                    120,
+                    () => this.#FetchWithTimeout(request).then(response => JSON.parse(response?.body ?? "{}")),
                     "realtime",
                 );
                 switch (body?.status) {
@@ -256,6 +287,15 @@ export default class ColorfulClouds {
             Console.info("✅ FetchMinutely", "Using cache");
             return this.#cache.minutely;
         }
+        if (this.#inflight.weather) {
+            try {
+                await this.#inflight.weather;
+            } catch {}
+            if (this.#cache.minutely?.result?.minutely?.status === "ok") {
+                Console.info("✅ FetchMinutely", "Using cache");
+                return this.#cache.minutely;
+            }
+        }
         if (this.#inflight.minutely) {
             Console.info("✅ FetchMinutely", "Joining in-flight request");
             return this.#inflight.minutely;
@@ -269,8 +309,8 @@ export default class ColorfulClouds {
             try {
                 const body = await this.#FetchJsonWithEdgeCache(
                     this.#BuildCacheKey("minutely", "", 3),
-                    60,
-                    () => fetch(request).then(response => JSON.parse(response?.body ?? "{}")),
+                    120,
+                    () => this.#FetchWithTimeout(request).then(response => JSON.parse(response?.body ?? "{}")),
                     "minutely",
                 );
                 switch (body?.status) {
@@ -310,6 +350,128 @@ export default class ColorfulClouds {
 
     prefetchMinutely() {
         return this.#FetchMinutely().catch(() => undefined);
+    }
+
+    #HourlyCacheHit(hourlysteps, begin) {
+        const cached = this.#cache.hourly;
+        if (cached?.status !== "ok" || cached?.result?.hourly?.status !== "ok") return false;
+        const series = cached.result.hourly;
+        const firstDatetime = series.skycon?.[0]?.datetime ?? series.temperature?.[0]?.datetime;
+        const lastDatetime = series.skycon?.at(-1)?.datetime ?? series.temperature?.at(-1)?.datetime;
+        const firstTs = firstDatetime ? Date.parse(firstDatetime) / 1000 : NaN;
+        const lastTs = lastDatetime ? Date.parse(lastDatetime) / 1000 : NaN;
+        if (!Number.isFinite(firstTs) || !Number.isFinite(lastTs)) return false;
+        const beginNum = begin !== undefined && begin !== null ? Number(begin) : undefined;
+        const hasValidBegin = Number.isFinite(beginNum);
+        if (Number(hourlysteps) <= 24) {
+            return hasValidBegin && firstTs <= beginNum + 3600 && lastTs >= beginNum + (Number(hourlysteps) - 1) * 3600;
+        }
+        return (!hasValidBegin || firstTs <= beginNum + 3600) && Array.isArray(series.skycon) && series.skycon.length >= 200;
+    }
+
+    #DailyCacheHit(dailysteps, begin) {
+        const cached = this.#cache.daily;
+        if (cached?.status !== "ok" || cached?.result?.daily?.status !== "ok") return false;
+        const series = cached.result.daily;
+        const firstDate = series.skycon?.[0]?.date;
+        const firstDayTs = firstDate ? Date.parse(firstDate) / 1000 : NaN;
+        if (!Number.isFinite(firstDayTs)) return false;
+        const beginNum = begin !== undefined && begin !== null ? Number(begin) : undefined;
+        const hasValidBegin = Number.isFinite(beginNum);
+        return (!hasValidBegin || firstDayTs <= beginNum + 3600) && Array.isArray(series.skycon) && series.skycon.length >= Math.min(dailysteps, 10);
+    }
+
+    async prefetchWeather({ begin, needRealtime = false, needMinutely = false, needHourly = false, needDaily = false } = {}) {
+        Console.info("☑️ prefetchWeather", `begin: ${begin}`);
+        if (this.#inflight.weather) return this.#inflight.weather;
+        const hasBegin = begin !== undefined && begin !== null && Number.isFinite(Number(begin));
+        const beginHour = hasBegin ? Math.floor(Number(begin) / 3600) * 3600 : undefined;
+        const cache = globalThis.caches?.default;
+        let hourlyCached = null;
+        let dailyCached = null;
+        if (cache && (needHourly || needDaily)) {
+            const checks = [];
+            if (needHourly) {
+                checks.push(
+                    (async () => {
+                        try {
+                            const key = this.#BuildCacheKey("hourly", beginHour !== undefined ? `steps=273&begin=${beginHour}` : "steps=273", 2);
+                            const hit = await cache.match(new Request(key, { method: "GET" }));
+                            if (hit) {
+                                const parsed = await hit.json();
+                                if (parsed?.status === "ok" && parsed?.result?.hourly?.status === "ok") hourlyCached = parsed;
+                            }
+                        } catch {}
+                    })(),
+                );
+            }
+            if (needDaily) {
+                checks.push(
+                    (async () => {
+                        try {
+                            const key = this.#BuildCacheKey("daily", beginHour !== undefined ? `steps=11&begin=${beginHour}` : "steps=11", 2);
+                            const hit = await cache.match(new Request(key, { method: "GET" }));
+                            if (hit) {
+                                const parsed = await hit.json();
+                                if (parsed?.status === "ok" && parsed?.result?.daily?.status === "ok") dailyCached = parsed;
+                            }
+                        } catch {}
+                    })(),
+                );
+            }
+            await Promise.all(checks);
+        }
+        if (hourlyCached) this.#cache.hourly = hourlyCached;
+        if (dailyCached) this.#cache.daily = dailyCached;
+        const needHourlyFetch = needHourly && !hourlyCached;
+        const needDailyFetch = needDaily && !dailyCached;
+        if (!needHourlyFetch && !needDailyFetch) {
+            if (needRealtime) this.prefetchRealTime();
+            if (needMinutely) this.prefetchMinutely();
+            Console.info("✅ prefetchWeather", "semi-warm hit, skip /weather");
+            return undefined;
+        }
+        const request = {
+            url: `${this.endpoint}/weather?dailysteps=11&hourlysteps=273&unit=metric:v2&lang=${this.language}&alert=true${hasBegin ? `&begin=${begin}` : ""}`,
+            headers: this.headers,
+        };
+        this.#inflight.weather = (async () => {
+            try {
+                const body = await this.#FetchWithTimeout(request).then(response => JSON.parse(response?.body ?? "{}"));
+                if (body?.status !== "ok") return body;
+                const serverTime = body.server_time;
+                const location = body.location;
+                if (body?.result?.realtime?.status === "ok") {
+                    this.#cache.realtime = { status: "ok", server_time: serverTime, location, result: { realtime: body.result.realtime, alert: body.result.alert } };
+                    switch (body?.result?.alert?.status) {
+                        case "ok":
+                            this.#cache.alert = body.result.alert;
+                            break;
+                    }
+                    await this.#WriteEdgeCache(this.#BuildCacheKey("realtime", "", 3), 120, this.#cache.realtime);
+                }
+                if (body?.result?.minutely?.status === "ok") {
+                    this.#cache.minutely = { status: "ok", server_time: serverTime, location, result: { minutely: body.result.minutely } };
+                    await this.#WriteEdgeCache(this.#BuildCacheKey("minutely", "", 3), 120, this.#cache.minutely);
+                }
+                if (body?.result?.hourly?.status === "ok") {
+                    this.#cache.hourly = { status: "ok", server_time: serverTime, location, result: { hourly: body.result.hourly } };
+                    await this.#WriteEdgeCache(this.#BuildCacheKey("hourly", beginHour !== undefined ? `steps=273&begin=${beginHour}` : "steps=273", 2), 600, this.#cache.hourly);
+                }
+                if (body?.result?.daily?.status === "ok") {
+                    this.#cache.daily = { status: "ok", server_time: serverTime, location, result: { daily: body.result.daily } };
+                    await this.#WriteEdgeCache(this.#BuildCacheKey("daily", beginHour !== undefined ? `steps=11&begin=${beginHour}` : "steps=11", 2), 1200, this.#cache.daily);
+                }
+                Console.info("✅ prefetchWeather");
+                return body;
+            } catch (error) {
+                Console.error(`prefetchWeather: ${error}`);
+                return undefined;
+            } finally {
+                delete this.#inflight.weather;
+            }
+        })();
+        return this.#inflight.weather;
     }
 
     async Minutely() {
@@ -476,18 +638,31 @@ export default class ColorfulClouds {
 
     async #Hourly(hourlysteps = 273, begin = undefined) {
         Console.info("☑️ Hourly", `hourlysteps: ${hourlysteps}`, `begin: ${begin}`);
+        if (this.#HourlyCacheHit(hourlysteps, begin)) {
+            Console.info("✅ Hourly", "Using cache");
+            return this.#cache.hourly;
+        }
+        if (this.#inflight.weather) {
+            try {
+                await this.#inflight.weather;
+            } catch {}
+            if (this.#HourlyCacheHit(hourlysteps, begin)) {
+                Console.info("✅ Hourly", "Using cache");
+                return this.#cache.hourly;
+            }
+        }
         const request = {
             url: `${this.endpoint}/hourly?hourlysteps=${hourlysteps}&unit=metric:v2&lang=${this.language}`,
             headers: this.headers,
         };
         if (begin) request.url += `&begin=${begin}`;
         try {
-            const fetchHourly = () => fetch(request).then(response => JSON.parse(response?.body ?? "{}"));
+            const fetchHourly = () => this.#FetchWithTimeout(request).then(response => JSON.parse(response?.body ?? "{}"));
             const hasBegin = begin !== undefined && begin !== null && Number.isFinite(Number(begin));
             const beginHour = hasBegin ? Math.floor(Number(begin) / 3600) * 3600 : undefined;
             const extraQuery = beginHour !== undefined ? `steps=${hourlysteps}&begin=${beginHour}` : `steps=${hourlysteps}`;
             const isYesterdayQuery = hasBegin && Number(hourlysteps) <= 24;
-            const ttlSeconds = isYesterdayQuery ? 1800 : 300;
+            const ttlSeconds = isYesterdayQuery ? 1800 : 600;
             const cacheKey = this.#BuildCacheKey("hourly", extraQuery, 2);
             const body = await this.#FetchJsonWithEdgeCache(
                 cacheKey,
@@ -499,6 +674,7 @@ export default class ColorfulClouds {
                 case "ok":
                     switch (body?.result?.hourly?.status) {
                         case "ok": {
+                            this.#cache.hourly = body;
                             Console.info("✅ Hourly");
                             return body;
                         }
@@ -521,8 +697,136 @@ export default class ColorfulClouds {
         return {};
     }
 
+    #BuildDailyDays(body, dailysteps) {
+        const isDayProbPercent = this.#IsPercentProbabilityScale((body?.result?.daily?.precipitation ?? []).map(item => item?.probability));
+        const isDaytimeProbPercent = this.#IsPercentProbabilityScale((body?.result?.daily?.precipitation_08h_20h ?? []).map(item => item?.probability));
+        const isOvernightProbPercent = this.#IsPercentProbabilityScale((body?.result?.daily?.precipitation_20h_32h ?? []).map(item => item?.probability));
+        const dayCount = Math.min(dailysteps, Array.isArray(body?.result?.daily?.skycon) ? body.result.daily.skycon.length : 0);
+        const days = [];
+        for (let i = 0; i < dayCount; i++) {
+            const timeStamp = (new Date(body?.result?.daily?.skycon?.[i]?.date).getTime() / 1000) | 0;
+            days.push({
+                forecastStart: timeStamp,
+                forecastEnd: timeStamp + 24 * 3600, // 24 hours
+                ...Weather.ConvertWeatherCodeField(body?.result?.daily?.skycon?.[i]?.value),
+                humidityMax: scaleFinite(body?.result?.daily?.humidity?.[i]?.max, 100, true),
+                humidityMin: scaleFinite(body?.result?.daily?.humidity?.[i]?.min, 100, true),
+                // maxUvIndex: Weather.ConvertDSWRF(body?.result?.daily?.dswrf?.[i]?.max), // ConvertDSWRF 转换不准确
+                // moonPhase: "", // Not given
+                // moonrise: body?.result?.daily?.astro?.[i].sunset.time, // Not given
+                // moonset: body?.result?.daily?.astro?.[i].sunrise.time, // Not given
+                // Caiyun `avg` is an average rate (mm/h), not WeatherKit's accumulated amount (mm).
+                // Leave both amount fields absent so the merge keeps Apple's paired scalar/by-type totals.
+                // precipitationAmountByType: [], // Not given
+                precipitationChance: this.#NormalizeProbability(body?.result?.daily?.precipitation?.[i]?.probability, isDayProbPercent),
+                // precipitationType: "", // Not given
+                // snowfallAmount: 0, // Not given
+                // solarMidnight: 0, // Not given
+                // solarNoon: 0, // Not given
+                //sunrise: body?.result?.daily?.astro?.[i].sunrise.time, // 未转换
+                // sunriseAstronomical: 0, // Not given
+                // sunriseCivil: 0, // Not given
+                // sunriseNautical: 0, // Not given
+                //sunset: body?.result?.daily?.astro?.[i].sunset.time, // 未转换
+                // sunsetAstronomical: 0, // Not given
+                // sunsetCivil: 0, // Not given
+                // sunsetNautical: 0, // Not given
+                temperatureMax: body?.result?.daily?.temperature?.[i]?.max,
+                // temperatureMaxTime: 0, // Not given
+                temperatureMin: body?.result?.daily?.temperature?.[i]?.min,
+                // temperatureMinTime: 0, // Not given
+                visibilityMax: scaleFinite(body?.result?.daily?.visibility?.[i]?.max, 1000),
+                visibilityMin: scaleFinite(body?.result?.daily?.visibility?.[i]?.min, 1000),
+                // windGustSpeedMax: 0, // Not given
+                windSpeedAvg: body?.result?.daily?.wind?.[i]?.avg?.speed,
+                windSpeedMax: body?.result?.daily?.wind?.[i]?.max?.speed,
+                daytimeForecast: {
+                    forecastStart: timeStamp + 8 * 3600, // 8 hours
+                    forecastEnd: timeStamp + 8 * 3600 + 12 * 3600, // 8 + 12 hours
+                    cloudCover: Math.round(body?.result?.daily?.cloudrate?.[i]?.avg * 100),
+                    // cloudCoverHighAltPct: 0, // Not given
+                    // cloudCoverLowAltPct: 0, // Not given
+                    // cloudCoverMidAltPct: 0, // Not given
+                    ...Weather.ConvertWeatherCodeField(body?.result?.daily?.skycon_08h_20h?.[i]?.value),
+                    // humidityMax: Math.round(body?.result?.daily?.humidity?.[i]?.max * 100), // Not given
+                    // humidityMin: Math.round(body?.result?.daily?.humidity?.[i]?.min * 100), // Not given
+                    // Caiyun `avg` is mm/h and cannot replace WeatherKit's accumulated precipitation total.
+                    // precipitationAmountByType: [], // Not given
+                    precipitationChance: this.#NormalizeProbability(body?.result?.daily?.precipitation_08h_20h?.[i]?.probability, isDaytimeProbPercent),
+                    // precipitationType: "", // Not given
+                    // snowfallAmount: 0, // Not given
+                    temperatureMax: body?.result?.daily?.temperature_08h_20h?.[i]?.max,
+                    temperatureMin: body?.result?.daily?.temperature_08h_20h?.[i]?.min,
+                    // visibilityMax: body?.result?.daily?.visibility?.[i]?.max * 1000, // Not given
+                    // visibilityMin: body?.result?.daily?.visibility?.[i]?.min * 1000, // Not given
+                    windDirection: this.#RoundUInt(body?.result?.daily?.wind_08h_20h?.[i]?.avg?.direction, 0, 360),
+                    // windGustSpeedMax: 0, // Not given
+                    windSpeed: body?.result?.daily?.wind_08h_20h?.[i]?.avg?.speed,
+                    windSpeedMax: body?.result?.daily?.wind_08h_20h?.[i]?.max?.speed,
+                },
+                overnightForecast: {
+                    forecastStart: timeStamp + 20 * 3600, // 20 hours
+                    forecastEnd: timeStamp + 20 * 3600 + 12 * 3600, // 20 + 12 hours
+                    cloudCover: Math.round(body?.result?.daily?.cloudrate?.[i]?.avg * 100),
+                    // cloudCoverHighAltPct: 0, // Not given
+                    // cloudCoverLowAltPct: 0, // Not given
+                    // cloudCoverMidAltPct: 0, // Not given
+                    ...Weather.ConvertWeatherCodeField(body?.result?.daily?.skycon_20h_32h?.[i]?.value),
+                    // humidityMax: Math.round(body?.result?.daily?.humidity?.[i]?.max * 100), // Not given
+                    // humidityMin: Math.round(body?.result?.daily?.humidity?.[i]?.min * 100), // Not given
+                    // Caiyun `avg` is mm/h and cannot replace WeatherKit's accumulated precipitation total.
+                    // precipitationAmountByType: [], // Not given
+                    precipitationChance: this.#NormalizeProbability(body?.result?.daily?.precipitation_20h_32h?.[i]?.probability, isOvernightProbPercent),
+                    // precipitationType: "", // Not given
+                    // snowfallAmount: 0, // Not given
+                    temperatureMax: body?.result?.daily?.temperature_20h_32h?.[i]?.max,
+                    temperatureMin: body?.result?.daily?.temperature_20h_32h?.[i]?.min,
+                    // visibilityMax: body?.result?.daily?.visibility?.[i]?.max * 1000, // Not given
+                    // visibilityMin: body?.result?.daily?.visibility?.[i]?.min * 1000, // Not given
+                    windDirection: this.#RoundUInt(body?.result?.daily?.wind_20h_32h?.[i]?.avg?.direction, 0, 360),
+                    // windGustSpeedMax: 0, // Not given
+                    windSpeed: body?.result?.daily?.wind_20h_32h?.[i]?.avg?.speed,
+                    windSpeedMax: body?.result?.daily?.wind_20h_32h?.[i]?.max?.speed,
+                },
+            });
+        }
+        return days;
+    }
+
+    #DailyFromCache(dailysteps) {
+        const cachedDaily = this.#cache.daily;
+        const timeStamp = (Date.now() / 1000) | 0;
+        const metadata = {
+            attributionUrl: "https://developer.apple.com/weatherkit/data-source-attribution/",
+            expireTime: timeStamp + 60 * 60,
+            language: "zh-CN",
+            latitude: cachedDaily?.location?.[0],
+            longitude: cachedDaily?.location?.[1],
+            providerLogo: providerNameToLogo("彩云天气", this.version),
+            providerName: "彩云天气",
+            readTime: timeStamp,
+            reportedTime: cachedDaily?.server_time,
+            temporarilyUnavailable: false,
+            sourceType: "STATION",
+        };
+        return { metadata, days: this.#BuildDailyDays(cachedDaily, dailysteps) };
+    }
+
     async Daily(dailysteps = 10, begin = undefined) {
         Console.info("☑️ Daily");
+        if (this.#DailyCacheHit(dailysteps, begin)) {
+            Console.info("✅ Daily", "Using cache");
+            return this.#DailyFromCache(dailysteps);
+        }
+        if (this.#inflight.weather) {
+            try {
+                await this.#inflight.weather;
+            } catch {}
+            if (this.#DailyCacheHit(dailysteps, begin)) {
+                Console.info("✅ Daily", "Using cache");
+                return this.#DailyFromCache(dailysteps);
+            }
+        }
         const request = {
             url: `${this.endpoint}/daily?dailysteps=${dailysteps}&unit=metric:v2&lang=${this.language}`,
             headers: this.headers,
@@ -530,14 +834,14 @@ export default class ColorfulClouds {
         if (begin) request.url += `&begin=${begin}`;
         let forecastDaily;
         try {
-            const fetchDaily = () => fetch(request).then(response => JSON.parse(response?.body ?? "{}"));
+            const fetchDaily = () => this.#FetchWithTimeout(request).then(response => JSON.parse(response?.body ?? "{}"));
             const hasBegin = begin !== undefined && begin !== null && Number.isFinite(Number(begin));
             const beginHour = hasBegin ? Math.floor(Number(begin) / 3600) * 3600 : undefined;
             const extraQuery = beginHour !== undefined ? `steps=${dailysteps}&begin=${beginHour}` : `steps=${dailysteps}`;
             const cacheKey = this.#BuildCacheKey("daily", extraQuery, 2);
             const body = await this.#FetchJsonWithEdgeCache(
                 cacheKey,
-                600,
+                1200,
                 fetchDaily,
                 "daily",
             );
@@ -545,6 +849,7 @@ export default class ColorfulClouds {
                 case "ok":
                     switch (body?.result?.daily?.status) {
                         case "ok": {
+                            this.#cache.daily = body;
                             const timeStamp = (Date.now() / 1000) | 0;
                             const metadata = {
                                 attributionUrl: "https://developer.apple.com/weatherkit/data-source-attribution/",
@@ -561,99 +866,8 @@ export default class ColorfulClouds {
                             };
                             forecastDaily = {
                                 metadata: metadata,
-                                days: [],
+                                days: this.#BuildDailyDays(body, dailysteps),
                             };
-                            const isDayProbPercent = this.#IsPercentProbabilityScale((body?.result?.daily?.precipitation ?? []).map(item => item?.probability));
-                            const isDaytimeProbPercent = this.#IsPercentProbabilityScale((body?.result?.daily?.precipitation_08h_20h ?? []).map(item => item?.probability));
-                            const isOvernightProbPercent = this.#IsPercentProbabilityScale((body?.result?.daily?.precipitation_20h_32h ?? []).map(item => item?.probability));
-                            const dayCount = Math.min(dailysteps, Array.isArray(body?.result?.daily?.skycon) ? body.result.daily.skycon.length : 0);
-                            for (let i = 0; i < dayCount; i++) {
-                                const timeStamp = (new Date(body?.result?.daily?.skycon?.[i]?.date).getTime() / 1000) | 0;
-                                forecastDaily.days.push({
-                                    forecastStart: timeStamp,
-                                    forecastEnd: timeStamp + 24 * 3600, // 24 hours
-                                    ...Weather.ConvertWeatherCodeField(body?.result?.daily?.skycon?.[i]?.value),
-                                    humidityMax: scaleFinite(body?.result?.daily?.humidity?.[i]?.max, 100, true),
-                                    humidityMin: scaleFinite(body?.result?.daily?.humidity?.[i]?.min, 100, true),
-                                    // maxUvIndex: Weather.ConvertDSWRF(body?.result?.daily?.dswrf?.[i]?.max), // ConvertDSWRF 转换不准确
-                                    // moonPhase: "", // Not given
-                                    // moonrise: body?.result?.daily?.astro?.[i].sunset.time, // Not given
-                                    // moonset: body?.result?.daily?.astro?.[i].sunrise.time, // Not given
-                                    // Caiyun `avg` is an average rate (mm/h), not WeatherKit's accumulated amount (mm).
-                                    // Leave both amount fields absent so the merge keeps Apple's paired scalar/by-type totals.
-                                    // precipitationAmountByType: [], // Not given
-                                    precipitationChance: this.#NormalizeProbability(body?.result?.daily?.precipitation?.[i]?.probability, isDayProbPercent),
-                                    // precipitationType: "", // Not given
-                                    // snowfallAmount: 0, // Not given
-                                    // solarMidnight: 0, // Not given
-                                    // solarNoon: 0, // Not given
-                                    //sunrise: body?.result?.daily?.astro?.[i].sunrise.time, // 未转换
-                                    // sunriseAstronomical: 0, // Not given
-                                    // sunriseCivil: 0, // Not given
-                                    // sunriseNautical: 0, // Not given
-                                    //sunset: body?.result?.daily?.astro?.[i].sunset.time, // 未转换
-                                    // sunsetAstronomical: 0, // Not given
-                                    // sunsetCivil: 0, // Not given
-                                    // sunsetNautical: 0, // Not given
-                                    temperatureMax: body?.result?.daily?.temperature?.[i]?.max,
-                                    // temperatureMaxTime: 0, // Not given
-                                    temperatureMin: body?.result?.daily?.temperature?.[i]?.min,
-                                    // temperatureMinTime: 0, // Not given
-                                    visibilityMax: scaleFinite(body?.result?.daily?.visibility?.[i]?.max, 1000),
-                                    visibilityMin: scaleFinite(body?.result?.daily?.visibility?.[i]?.min, 1000),
-                                    // windGustSpeedMax: 0, // Not given
-                                    windSpeedAvg: body?.result?.daily?.wind?.[i]?.avg?.speed,
-                                    windSpeedMax: body?.result?.daily?.wind?.[i]?.max?.speed,
-                                    daytimeForecast: {
-                                        forecastStart: timeStamp + 8 * 3600, // 8 hours
-                                        forecastEnd: timeStamp + 8 * 3600 + 12 * 3600, // 8 + 12 hours
-                                        cloudCover: Math.round(body?.result?.daily?.cloudrate?.[i]?.avg * 100),
-                                        // cloudCoverHighAltPct: 0, // Not given
-                                        // cloudCoverLowAltPct: 0, // Not given
-                                        // cloudCoverMidAltPct: 0, // Not given
-                                        ...Weather.ConvertWeatherCodeField(body?.result?.daily?.skycon_08h_20h?.[i]?.value),
-                                        // humidityMax: Math.round(body?.result?.daily?.humidity?.[i]?.max * 100), // Not given
-                                        // humidityMin: Math.round(body?.result?.daily?.humidity?.[i]?.min * 100), // Not given
-                                        // Caiyun `avg` is mm/h and cannot replace WeatherKit's accumulated precipitation total.
-                                        // precipitationAmountByType: [], // Not given
-                                        precipitationChance: this.#NormalizeProbability(body?.result?.daily?.precipitation_08h_20h?.[i]?.probability, isDaytimeProbPercent),
-                                        // precipitationType: "", // Not given
-                                        // snowfallAmount: 0, // Not given
-                                        temperatureMax: body?.result?.daily?.temperature_08h_20h?.[i]?.max,
-                                        temperatureMin: body?.result?.daily?.temperature_08h_20h?.[i]?.min,
-                                        // visibilityMax: body?.result?.daily?.visibility?.[i]?.max * 1000, // Not given
-                                        // visibilityMin: body?.result?.daily?.visibility?.[i]?.min * 1000, // Not given
-                                        windDirection: this.#RoundUInt(body?.result?.daily?.wind_08h_20h?.[i]?.avg?.direction, 0, 360),
-                                        // windGustSpeedMax: 0, // Not given
-                                        windSpeed: body?.result?.daily?.wind_08h_20h?.[i]?.avg?.speed,
-                                        windSpeedMax: body?.result?.daily?.wind_08h_20h?.[i]?.max?.speed,
-                                    },
-                                    overnightForecast: {
-                                        forecastStart: timeStamp + 20 * 3600, // 20 hours
-                                        forecastEnd: timeStamp + 20 * 3600 + 12 * 3600, // 20 + 12 hours
-                                        cloudCover: Math.round(body?.result?.daily?.cloudrate?.[i]?.avg * 100),
-                                        // cloudCoverHighAltPct: 0, // Not given
-                                        // cloudCoverLowAltPct: 0, // Not given
-                                        // cloudCoverMidAltPct: 0, // Not given
-                                        ...Weather.ConvertWeatherCodeField(body?.result?.daily?.skycon_20h_32h?.[i]?.value),
-                                        // humidityMax: Math.round(body?.result?.daily?.humidity?.[i]?.max * 100), // Not given
-                                        // humidityMin: Math.round(body?.result?.daily?.humidity?.[i]?.min * 100), // Not given
-                                        // Caiyun `avg` is mm/h and cannot replace WeatherKit's accumulated precipitation total.
-                                        // precipitationAmountByType: [], // Not given
-                                        precipitationChance: this.#NormalizeProbability(body?.result?.daily?.precipitation_20h_32h?.[i]?.probability, isOvernightProbPercent),
-                                        // precipitationType: "", // Not given
-                                        // snowfallAmount: 0, // Not given
-                                        temperatureMax: body?.result?.daily?.temperature_20h_32h?.[i]?.max,
-                                        temperatureMin: body?.result?.daily?.temperature_20h_32h?.[i]?.min,
-                                        // visibilityMax: body?.result?.daily?.visibility?.[i]?.max * 1000, // Not given
-                                        // visibilityMin: body?.result?.daily?.visibility?.[i]?.min * 1000, // Not given
-                                        windDirection: this.#RoundUInt(body?.result?.daily?.wind_20h_32h?.[i]?.avg?.direction, 0, 360),
-                                        // windGustSpeedMax: 0, // Not given
-                                        windSpeed: body?.result?.daily?.wind_20h_32h?.[i]?.avg?.speed,
-                                        windSpeedMax: body?.result?.daily?.wind_20h_32h?.[i]?.max?.speed,
-                                    },
-                                });
-                            }
                             break;
                         }
                         case "error":

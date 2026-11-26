@@ -14,6 +14,12 @@ export default new Hono()
     .all("/:rest{.*}", async c => {
         let $request = await HonoWorkerAdapter.buildRequest(c.req);
         $request = HonoWorkerAdapter.buildArgument($request);
+        let waitUntil;
+        try {
+            const ctx = c.executionCtx;
+            if (typeof ctx?.waitUntil === "function") waitUntil = p => ctx.waitUntil(p);
+        } catch {}
+        if (waitUntil) $request._waitUntil = waitUntil;
         let $response;
         ({ $request, $response } = await Request($request));
         switch (typeof $response) {
@@ -23,13 +29,43 @@ export default new Hono()
                     if (reqUrl.pathname.startsWith("/api/v3/weather/") || reqUrl.pathname.startsWith("/api/v2/weather/")) {
                         const params = parseWeatherKitURL(reqUrl);
                         params.country = resolveCountryForResponse(reqUrl, params);
+                        const { Settings } = setENV("iRingo", "WeatherKit", database);
+                        const token = Settings?.API?.ColorfulClouds?.Token || "Y2FpeXVuX25vdGlmeQ==";
+                        const ds = new Set(params.dataSets);
                         if (params.country === "CN") {
-                            const { Settings } = setENV("iRingo", "WeatherKit", database);
                             if (Settings?.Weather?.Provider === "ColorfulClouds" || Settings?.NextHour?.Provider === "ColorfulClouds") {
-                                const cc = new ColorfulClouds(params, Settings?.API?.ColorfulClouds?.Token || "Y2FpeXVuX25vdGlmeQ==");
-                                const ds = new Set(params.dataSets);
-                                if (ds.has("currentWeather") || ds.has("airQuality")) cc.prefetchRealTime();
-                                if (ds.has("forecastNextHour")) cc.prefetchMinutely();
+                                const cc = new ColorfulClouds(params, token, waitUntil);
+                                if ((ds.has("forecastHourly") || ds.has("forecastDaily")) && Settings?.Weather?.Provider === "ColorfulClouds") {
+                                    let begin;
+                                    const rawDailyStart = reqUrl.searchParams.get("dailyStart");
+                                    if (rawDailyStart) {
+                                        const parsedDailyStart = Date.parse(rawDailyStart);
+                                        if (Number.isFinite(parsedDailyStart)) begin = Math.floor(parsedDailyStart / 1000);
+                                    }
+                                    if (begin === undefined) {
+                                        const rawRelativeDailyStart = reqUrl.searchParams.get("relativeDailyStart");
+                                        if (rawRelativeDailyStart !== null && rawRelativeDailyStart !== "" && Number.isInteger(Number(rawRelativeDailyStart))) {
+                                            const dayOffset = Number(rawRelativeDailyStart);
+                                            begin = (Math.floor((Date.now() + 8 * 3600 * 1000) / 86400000) + dayOffset) * 86400 - 8 * 3600;
+                                        }
+                                    }
+                                    cc.prefetchWeather({
+                                        begin,
+                                        needRealtime: ds.has("currentWeather") || ds.has("airQuality"),
+                                        needMinutely: ds.has("forecastNextHour"),
+                                        needHourly: ds.has("forecastHourly"),
+                                        needDaily: ds.has("forecastDaily"),
+                                    });
+                                } else {
+                                    if (ds.has("currentWeather") || ds.has("airQuality")) cc.prefetchRealTime();
+                                    if (ds.has("forecastNextHour")) cc.prefetchMinutely();
+                                }
+                                $request._prefetchedColorfulClouds = cc;
+                            }
+                        } else if (params.country === "HK" || params.country === "MO") {
+                            if (ds.has("airQuality") && (Settings?.AirQuality?.Current?.Pollutants?.Provider === "ColorfulClouds" || Settings?.AirQuality?.Current?.Index?.Provider === "ColorfulCloudsCN")) {
+                                const cc = new ColorfulClouds(params, token, waitUntil);
+                                cc.prefetchRealTime();
                                 $request._prefetchedColorfulClouds = cc;
                             }
                         }
@@ -48,5 +84,5 @@ export default new Hono()
     })
     .onError((e, c) => {
         console.error(e);
-        return c.body(e.message, 500);
+        return c.text("Internal Server Error", 500);
     });

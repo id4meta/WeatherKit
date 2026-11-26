@@ -30,7 +30,7 @@
 - 有效期动态分档：有雨或预告有雨 300 秒，全无雨 3600 秒，以 forecastEnd 封顶。
 - 降水概率自适应归一化：同一接口同时存在 0–1 与 0–100 两种口径，按实际值判定，不直接乘 100；缺失值返回 undefined，不回填 0。
 - 雨强换算为 Weibull 曲线：`perceived = 3 × (1 − exp(−0.17117 × I^0.74272))`，钳制 [0.1, 3]；强度低于 0.08 mm/h 视为无雨。
-- 实况与逐分钟双向同步：以 perceived ≥ 0.1 判定是否正在降雨；强度取两者较大值。
+- 实况与逐分钟正向同步：以 perceived ≥ 0.1 判定是否正在降雨；强度取两者较大值。
 - 逐分钟数据仅对中国大陆开放。
 
 ### 5. WK3 二进制编码适配（`src/process/Response.mjs` 及相关类）
@@ -46,10 +46,13 @@
 
 ### 7. 性能与边缘缓存
 
-- 请求并发预热：realtime 与 minutely 在响应处理前并行拉取并复用。
+- 四合一预取：大陆完整请求（`forecastHourly` / `forecastDaily`）在请求阶段先发一次彩云 `/weather` 四合一接口，一次拉取实况、逐分钟、逐小时、逐日四路数据并回填内存与边缘缓存，下游不再重复请求；`begin` 由 `dailyStart` 或 `relativeDailyStart`（东八区当日 00:00 偏移）推导。半热命中时仅刷新未命中的路；港澳 airQuality 请求仅预热 realtime；台湾与国外请求零预热。
 - 流式 Gzip：响应体 ≥ 2048 字节且客户端支持 gzip 时压缩；204、304、HEAD 不压缩。
 - `replaceWeather` 脏检查改为元数据快速短路；非中国大陆请求不做数据集清扫（`sweepDataSets`）。
-- 彩云上游短缓存（`caches.default`）：realtime、minutely 60 秒；hourly 300 秒（昨日历史查询 1800 秒）；daily 600 秒；读写均校验 status 为 ok。
+- 彩云上游分层短缓存（`caches.default`）：realtime、minutely 120 秒；hourly 600 秒（昨日历史查询 1800 秒）；daily 1200 秒；读写均校验 status 为 ok。缓存写入经 Workers `waitUntil` 非阻塞，或无 `waitUntil` 时 await 写入。
+- 和风预警详情页 180 秒边缘缓存：仅 HTTP 200 且预警非空时写入，空结果绝不入缓存。
+- 上游超时保护：彩云与和风请求均设 4000 ms 超时，超时走既有 fail-closed 降级。
+- 错误脱敏：服务端 500 响应统一为 `Internal Server Error`，详细异常仅记入日志。
 
 ### 8. 预警详情页（`src/class/WeatherAlerts.mjs`）
 
@@ -75,7 +78,7 @@
 ## 测试
 
 - 运行：`node --test tests/*.test.mjs`
-- 现状（2026-11-26）：195 项，149 通过、46 失败、0 跳过。46 项失败全部为缺真实协议编解码包所致（`@nsringo/weatherkit` 编解码包不在公开 npm registry），与业务代码无关；失败名录自建立基线以来无新增。
+- 现状（2026-11-26）：208 项，162 通过、46 失败、0 跳过。46 项失败全部为缺真实协议编解码包所致（`@nsringo/weatherkit` 编解码包不在公开 npm registry），与业务代码无关；失败名录自建立基线以来无新增。
 - `npm run build` 依赖 rollup，本地未安装时退出码 127，非代码错误。
 
 ## 已知限制

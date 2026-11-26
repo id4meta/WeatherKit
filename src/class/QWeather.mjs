@@ -468,15 +468,26 @@ export default class QWeather {
         };
     }
 
+    static #FetchWithTimeout(request, timeoutMs = 4000) {
+        let timeoutId;
+        const timeoutPromise = new Promise((_, reject) => {
+            timeoutId = setTimeout(() => reject(new Error("Upstream fetch timed out")), timeoutMs);
+        });
+        const fetchPromise = fetch(request);
+        fetchPromise.catch(() => {});
+        return Promise.race([fetchPromise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
+    }
+
     /**
      * 抓取并提取 QWeather 灾害预警页面。
      * Fetch and extract a QWeather severe-weather page.
      * @param {string} identifier 地区标识 / Location identifier.
      * @param {string} language WeatherKit 语言 / WeatherKit language.
      * @param {Record<string, string | string[] | undefined>} requestHeaders 原请求头 / Original request headers.
+     * @param {Function} [waitUntil] Workers waitUntil，非阻塞写入边缘缓存 / Workers waitUntil for non-blocking edge-cache writes.
      * @returns {Promise<{alerts: Array<object>, areaName: string, source: string}>} 来源集合 / Source collection.
      */
-    static async FetchWeatherAlertPage(identifier, language = "zh-CN", requestHeaders = {}) {
+    static async FetchWeatherAlertPage(identifier, language = "zh-CN", requestHeaders = {}, waitUntil) {
         const sourceUrl = QWeather.BuildWeatherAlertPageURL(identifier, language);
         const normalizedHeaders = Object.fromEntries(Object.entries(requestHeaders).map(([key, value]) => [key.toLowerCase(), value]));
         const sourceHeaders = {
@@ -486,8 +497,23 @@ export default class QWeather {
         };
         if (normalizedHeaders["user-agent"]) sourceHeaders["User-Agent"] = normalizedHeaders["user-agent"];
 
+        const cacheKey = `https://cache.internal/qweather/alert-page/${encodeURIComponent(identifier)}?lang=${encodeURIComponent(language)}`;
+        const cache = globalThis.caches?.default;
+        if (cache) {
+            try {
+                const cached = await cache.match(new Request(cacheKey, { method: "GET" }));
+                if (cached) {
+                    const parsed = await cached.json();
+                    if (Array.isArray(parsed?.alerts) && parsed.alerts.length > 0) {
+                        Console.info("✅ QWeather.FetchWeatherAlertPage", "Using cache");
+                        return parsed;
+                    }
+                }
+            } catch {}
+        }
+
         Console.info("☑️ QWeather.FetchWeatherAlertPage", `url: ${sourceUrl}`, `language: ${language}`);
-        const sourceResponse = await fetch({
+        const sourceResponse = await QWeather.#FetchWithTimeout({
             url: sourceUrl.toString(),
             headers: sourceHeaders,
             "auto-cookie": false,
@@ -510,7 +536,7 @@ export default class QWeather {
         const extracted = QWeather.ExtractWeatherAlertPage(html);
         Console.info("✅ QWeather.FetchWeatherAlertPage", `alerts: ${extracted.alerts.length}`, `source: ${extracted.source}`);
         const areaId = identifier.match(/-(\d+)$/)?.[1];
-        return {
+        const result = {
             ...extracted,
             alerts: extracted.alerts.map(alert => ({
                 ...alert,
@@ -518,6 +544,21 @@ export default class QWeather {
                 ...(extracted.areaName && !alert.areaName ? { areaName: extracted.areaName } : {}),
             })),
         };
+        const httpStatus = sourceResponse.status ?? sourceResponse.statusCode;
+        if (cache && httpStatus === 200 && Array.isArray(result.alerts) && result.alerts.length > 0) {
+            try {
+                const cacheResp = new Response(JSON.stringify(result), {
+                    headers: {
+                        "Content-Type": "application/json; charset=utf-8",
+                        "Cache-Control": "public, max-age=180",
+                    },
+                });
+                const putPromise = cache.put(new Request(cacheKey, { method: "GET" }), cacheResp).catch(() => {});
+                if (typeof waitUntil === "function") waitUntil(putPromise);
+                else await putPromise;
+            } catch {}
+        }
+        return result;
     }
 
     async GeoAPI(path = "city/lookup") {
