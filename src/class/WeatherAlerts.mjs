@@ -397,6 +397,7 @@ export default class WeatherAlerts {
                 id: uid,
                 ...(areaId ? { areaId } : {}),
                 ...(areaName ? { areaName } : {}),
+                attributionURL: context.attributionUrl.toString(),
                 certainty: alert.certainty || "unknown",
                 countryCode: context.countryCode ?? "",
                 description,
