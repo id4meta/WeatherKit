@@ -306,6 +306,7 @@ function hourlyModule(firstTs, count) {
         apparent_temperature: hours.map(hour => hour.apparent_temperature),
         visibility: hours.map(hour => hour.visibility),
         wind: hours.map(hour => hour.wind),
+        air_quality: { aqi: hours.map((hour, index) => ({ datetime: hour.skycon.datetime, value: { usa: 100 + index, chn: 50 + index } })) },
     };
 }
 
@@ -525,6 +526,128 @@ test("4000ms upstream timeout degrades to fail-closed", async () => {
         assert.ok(elapsedMs >= 3900, `must wait out the 4000ms timeout, elapsed ${elapsedMs}ms`);
         assert.ok(elapsedMs < 15000, `must not hang past the timeout, elapsed ${elapsedMs}ms`);
         assert.equal(result.metadata.temporarilyUnavailable, true);
+    } finally {
+        globalThis.fetch = originalFetch;
+        globalThis.caches = originalCaches;
+    }
+});
+
+function cstBounds(now = Date.now()) {
+    const cst = new Date(now + 8 * 3600 * 1000);
+    const yesterdayBegin = Math.floor(Date.UTC(cst.getUTCFullYear(), cst.getUTCMonth(), cst.getUTCDate() - 1) / 1000) - 8 * 3600;
+    const currentHour = Math.floor((now + 8 * 3600 * 1000) / 3600000) * 3600 - 8 * 3600;
+    const firstDayIso = `${new Date((yesterdayBegin + 8 * 3600) * 1000).toISOString().slice(0, 10)}T00:00:00+08:00`;
+    const targetHourTs = Math.floor(Math.trunc((now - 864e5) / 1000) / 3600) * 3600;
+    const targetIndex = (targetHourTs - yesterdayBegin) / 3600;
+    return { yesterdayBegin, currentHour, firstDayIso, targetHourTs, targetIndex };
+}
+
+function realtimeAirQuality() {
+    return {
+        obs_time: 1795415760,
+        aqi: { usa: 70, chn: 65 },
+        description: { usa: "Moderate", chn: "良" },
+        pm25: 40, pm10: 55, o3: 60, no2: 20, so2: 8, co: 0.8,
+        pm25_iaqi_chn: 55, pm10_iaqi_chn: 50, o3_iaqi_chn: 40, no2_iaqi_chn: 25, so2_iaqi_chn: 10, co_iaqi_chn: 15,
+    };
+}
+
+test("prefetchWeather cold race: un-awaited prefetch plus 6 concurrent calls make exactly one /weather fetch", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalCaches = globalThis.caches;
+    const mockCache = createMockCache();
+    globalThis.caches = { default: mockCache };
+    const { yesterdayBegin, currentHour, firstDayIso, targetIndex } = cstBounds();
+    const router = createRoutingFetch([{
+        match: url => url.includes("/weather?"),
+        body: () => {
+            const body = weatherResponse(yesterdayBegin, firstDayIso);
+            body.result.realtime.air_quality = realtimeAirQuality();
+            return body;
+        },
+    }]);
+    globalThis.fetch = router.fetch;
+    try {
+        const cc = newInstance();
+        const prefetchPromise = cc.prefetchWeather({ begin: yesterdayBegin, needRealtime: true, needMinutely: true, needHourly: true, needDaily: true });
+        const settled = await Promise.race([
+            Promise.all([
+                prefetchPromise,
+                cc.CurrentWeather(),
+                cc.CurrentAirQuality(false, true),
+                cc.YesterdayAirQuality(true),
+                cc.Minutely(),
+                cc.ForecastHourly(273, currentHour),
+                cc.Daily(11, yesterdayBegin),
+            ]).then(results => ({ done: true, results })),
+            new Promise(resolve => setTimeout(() => resolve({ done: false }), 5000)),
+        ]);
+        assert.equal(settled.done, true, "concurrent calls must settle (no deadlock)");
+        const [, current, currentAq, yesterdayAq, minutely, hourly, daily] = settled.results;
+        assert.equal(router.calls.length, 1, `exactly one fetch expected, got ${router.calls.length}: ${router.calls.join(", ")}`);
+        assert.ok(router.calls[0].includes("/weather?"), `the only fetch must be /weather, got ${router.calls[0]}`);
+        assert.equal(mockCache.putCalls.length, 4, `one /weather must backfill 4 edge caches, got ${JSON.stringify(mockCache.putCalls)}`);
+        assert.equal(current.temperature, 20);
+        assert.equal(currentAq.index, 65);
+        assert.equal(yesterdayAq.index, 100 + targetIndex, `YesterdayAirQuality must take the 24h-ago hour value, got ${yesterdayAq.index}, expected ${100 + targetIndex}`);
+        assert.equal(minutely.minutes.length, 85);
+        assert.equal(hourly.hours.length, 273);
+        assert.equal(daily.days.length, 11);
+    } finally {
+        globalThis.fetch = originalFetch;
+        globalThis.caches = originalCaches;
+    }
+});
+
+test("prefetchWeather semi-warm race: un-awaited prefetch plus 6 concurrent calls fetch only realtime/minutely", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalCaches = globalThis.caches;
+    const mockCache = createMockCache();
+    globalThis.caches = { default: mockCache };
+    const { yesterdayBegin, currentHour, firstDayIso, targetIndex } = cstBounds();
+    const hourlyBody = { status: "ok", server_time: 1795415760, location: [114.06, 22.54], result: { hourly: hourlyModule(yesterdayBegin, 273) } };
+    const dailyBody = { status: "ok", server_time: 1795415760, location: [114.06, 22.54], result: { daily: dailyModule(firstDayIso, 11) } };
+    mockCache.store.set(`https://cache.internal/caiyun/v2.6/hourly/114.06,22.54?lang=zh_CN&steps=273&begin=${yesterdayBegin}`, { text: JSON.stringify(hourlyBody), headers: { "cache-control": "public, max-age=600" } });
+    mockCache.store.set(`https://cache.internal/caiyun/v2.6/daily/114.06,22.54?lang=zh_CN&steps=11&begin=${yesterdayBegin}`, { text: JSON.stringify(dailyBody), headers: { "cache-control": "public, max-age=1200" } });
+    const router = createRoutingFetch([
+        {
+            match: url => url.includes("/realtime?"),
+            body: () => {
+                const body = realtimeResponse(20);
+                body.result.realtime.air_quality = realtimeAirQuality();
+                return body;
+            },
+        },
+        { match: url => url.includes("/minutely?"), body: () => minutelyResponse() },
+    ]);
+    globalThis.fetch = router.fetch;
+    try {
+        const cc = newInstance();
+        const prefetchPromise = cc.prefetchWeather({ begin: yesterdayBegin, needRealtime: true, needMinutely: true, needHourly: true, needDaily: true });
+        const settled = await Promise.race([
+            Promise.all([
+                prefetchPromise,
+                cc.CurrentWeather(),
+                cc.CurrentAirQuality(false, true),
+                cc.YesterdayAirQuality(true),
+                cc.Minutely(),
+                cc.ForecastHourly(273, currentHour),
+                cc.Daily(11, yesterdayBegin),
+            ]).then(results => ({ done: true, results })),
+            new Promise(resolve => setTimeout(() => resolve({ done: false }), 5000)),
+        ]);
+        assert.equal(settled.done, true, "concurrent calls must settle (no deadlock)");
+        assert.equal(router.calls.length, 2, `only realtime and minutely may be fetched, got ${router.calls.join(", ")}`);
+        assert.equal(router.calls.filter(url => url.includes("/weather?")).length, 0, `must not fetch /weather, got ${router.calls.join(", ")}`);
+        assert.equal(router.calls.filter(url => url.includes("/hourly?")).length, 0, `must not fetch /hourly, got ${router.calls.join(", ")}`);
+        assert.equal(router.calls.filter(url => url.includes("/daily?")).length, 0, `must not fetch /daily, got ${router.calls.join(", ")}`);
+        const [, current, currentAq, yesterdayAq, minutely, hourly, daily] = settled.results;
+        assert.equal(current.temperature, 20);
+        assert.equal(currentAq.index, 65);
+        assert.equal(yesterdayAq.index, 100 + targetIndex, `YesterdayAirQuality must take the 24h-ago hour value, got ${yesterdayAq.index}, expected ${100 + targetIndex}`);
+        assert.equal(minutely.minutes.length, 85);
+        assert.equal(hourly.hours.length, 273);
+        assert.equal(daily.days.length, 11);
     } finally {
         globalThis.fetch = originalFetch;
         globalThis.caches = originalCaches;

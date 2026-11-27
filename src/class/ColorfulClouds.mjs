@@ -276,14 +276,14 @@ export default class ColorfulClouds {
         return body;
     }
 
-    async #RealTime() {
+    async #RealTime({ skipWeatherWait = false } = {}) {
         Console.info("☑️ RealTime");
 
         if (this.#cache.realtime?.result?.realtime?.status === "ok") {
             Console.info("✅ RealTime", "Using cache");
             return this.#cache.realtime;
         }
-        if (this.#inflight.weather) {
+        if (!skipWeatherWait && this.#inflight.weather) {
             try {
                 await this.#inflight.weather;
             } catch {}
@@ -347,14 +347,14 @@ export default class ColorfulClouds {
         return this.#inflight.realtime;
     }
 
-    async #FetchMinutely() {
+    async #FetchMinutely({ skipWeatherWait = false } = {}) {
         Console.info("☑️ FetchMinutely");
 
         if (this.#cache.minutely?.result?.minutely?.status === "ok") {
             Console.info("✅ FetchMinutely", "Using cache");
             return this.#cache.minutely;
         }
-        if (this.#inflight.weather) {
+        if (!skipWeatherWait && this.#inflight.weather) {
             try {
                 await this.#inflight.weather;
             } catch {}
@@ -502,46 +502,46 @@ export default class ColorfulClouds {
     async prefetchWeather({ begin, needRealtime = false, needMinutely = false, needHourly = false, needDaily = false } = {}) {
         Console.info("☑️ prefetchWeather", `begin: ${begin}`);
         if (this.#inflight.weather) return this.#inflight.weather;
-        const hasBegin = begin !== undefined && begin !== null && Number.isFinite(Number(begin));
-        const beginHour = hasBegin ? Math.floor(Number(begin) / 3600) * 3600 : undefined;
-        let hourlyCached = null;
-        let dailyCached = null;
-        if (needHourly || needDaily) {
-            const checks = [];
-            if (needHourly) {
-                checks.push(
-                    (async () => {
-                        const key = this.#BuildCacheKey("hourly", beginHour !== undefined ? `steps=273&begin=${beginHour}` : "steps=273", 2);
-                        hourlyCached = await this.#PrefetchKindCheck("hourly", key, 600 * 1000, 1800 * 1000, () => this.#FetchWithTimeout(this.#HourlyRequest(273, begin)).then(response => JSON.parse(response?.body ?? "{}")));
-                    })(),
-                );
-            }
-            if (needDaily) {
-                checks.push(
-                    (async () => {
-                        const key = this.#BuildCacheKey("daily", beginHour !== undefined ? `steps=11&begin=${beginHour}` : "steps=11", 2);
-                        dailyCached = await this.#PrefetchKindCheck("daily", key, 1200 * 1000, 3600 * 1000, () => this.#FetchWithTimeout(this.#DailyRequest(11, begin)).then(response => JSON.parse(response?.body ?? "{}")));
-                    })(),
-                );
-            }
-            await Promise.all(checks);
-        }
-        if (hourlyCached) this.#cache.hourly = hourlyCached;
-        if (dailyCached) this.#cache.daily = dailyCached;
-        const needHourlyFetch = needHourly && !hourlyCached;
-        const needDailyFetch = needDaily && !dailyCached;
-        if (!needHourlyFetch && !needDailyFetch) {
-            if (needRealtime) this.prefetchRealTime();
-            if (needMinutely) this.prefetchMinutely();
-            Console.info("✅ prefetchWeather", "semi-warm hit, skip /weather");
-            return undefined;
-        }
-        const request = {
-            url: `${this.endpoint}/weather?dailysteps=11&hourlysteps=273&unit=metric:v2&lang=${this.language}&alert=true${hasBegin ? `&begin=${begin}` : ""}`,
-            headers: this.headers,
-        };
         this.#inflight.weather = (async () => {
             try {
+                const hasBegin = begin !== undefined && begin !== null && Number.isFinite(Number(begin));
+                const beginHour = hasBegin ? Math.floor(Number(begin) / 3600) * 3600 : undefined;
+                let hourlyCached = null;
+                let dailyCached = null;
+                if (needHourly || needDaily) {
+                    const checks = [];
+                    if (needHourly) {
+                        checks.push(
+                            (async () => {
+                                const key = this.#BuildCacheKey("hourly", beginHour !== undefined ? `steps=273&begin=${beginHour}` : "steps=273", 2);
+                                hourlyCached = await this.#PrefetchKindCheck("hourly", key, 600 * 1000, 1800 * 1000, () => this.#FetchWithTimeout(this.#HourlyRequest(273, begin)).then(response => JSON.parse(response?.body ?? "{}")));
+                            })(),
+                        );
+                    }
+                    if (needDaily) {
+                        checks.push(
+                            (async () => {
+                                const key = this.#BuildCacheKey("daily", beginHour !== undefined ? `steps=11&begin=${beginHour}` : "steps=11", 2);
+                                dailyCached = await this.#PrefetchKindCheck("daily", key, 1200 * 1000, 3600 * 1000, () => this.#FetchWithTimeout(this.#DailyRequest(11, begin)).then(response => JSON.parse(response?.body ?? "{}")));
+                            })(),
+                        );
+                    }
+                    await Promise.all(checks);
+                }
+                if (hourlyCached) this.#cache.hourly = hourlyCached;
+                if (dailyCached) this.#cache.daily = dailyCached;
+                const needHourlyFetch = needHourly && !hourlyCached;
+                const needDailyFetch = needDaily && !dailyCached;
+                if (!needHourlyFetch && !needDailyFetch) {
+                    if (needRealtime) this.#RealTime({ skipWeatherWait: true }).catch(() => {});
+                    if (needMinutely) this.#FetchMinutely({ skipWeatherWait: true }).catch(() => {});
+                    Console.info("✅ prefetchWeather", "semi-warm hit, skip /weather");
+                    return undefined;
+                }
+                const request = {
+                    url: `${this.endpoint}/weather?dailysteps=11&hourlysteps=273&unit=metric:v2&lang=${this.language}&alert=true${hasBegin ? `&begin=${begin}` : ""}`,
+                    headers: this.headers,
+                };
                 const body = await this.#FetchWithTimeout(request).then(response => JSON.parse(response?.body ?? "{}"));
                 if (body?.status !== "ok") return body;
                 const serverTime = body.server_time;
@@ -1221,7 +1221,9 @@ export default class ColorfulClouds {
     async YesterdayAirQuality(useUsa = true) {
         Console.info("☑️ YesterdayAirQuality");
 
-        const yesterdayHourly = await this.#Hourly(1, Math.trunc((Date.now() - 864e5) / 1000));
+        const targetTs = Math.trunc((Date.now() - 864e5) / 1000);
+        const targetHourTs = Math.floor(targetTs / 3600) * 3600;
+        const yesterdayHourly = await this.#Hourly(1, targetTs);
         const scale = useUsa ? AirQuality.Config.Scales.EPA_NowCast : AirQuality.Config.Scales.HJ6332012;
         const particularAirQuality = {
             previousDayComparison: AirQuality.Config.CompareCategoryIndexes.UNKNOWN,
@@ -1239,7 +1241,9 @@ export default class ColorfulClouds {
             };
         }
 
-        const { usa, chn } = yesterdayHourly.result.hourly.air_quality.aqi[0].value;
+        const aqi = yesterdayHourly.result.hourly.air_quality.aqi;
+        const targetEntry = aqi.find(item => Date.parse(item?.datetime) / 1000 === targetHourTs) ?? aqi[0];
+        const { usa, chn } = targetEntry.value;
         if (usa === 0 && chn === 0) {
             Console.warn("YesterdayAirQuality", "usa和chn的AQI值都为0，不支持的位置？");
         }
