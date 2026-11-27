@@ -14,16 +14,39 @@ import getStorage from "@nsnanocat/util/getStorage.mjs";
 // 每次返回浅拷贝外壳与全新的 Caches: {}，避免跨请求共享可变状态。
 let cachedDefaultEnv = null;
 
-// $argument（字符串或对象）中与默认 Settings 顶层键冲突的键，视为覆盖。
-const argumentOverrideKeys = defaultSettings => {
+// $argument（字符串或对象）中的键都会被 getStorage 合并进 Settings，包括默认 Settings 顶层
+// 不存在的键（如 LogLevel 只在 Default.Settings 中），因此须以全部 $argument 键为准；
+// 解析后复核时 Settings 已含全部 $argument 键，同一谓词行为不变。
+const argumentOverrideKeys = () => {
     const argument = globalThis.$argument;
     if (!argument) return [];
-    const keys = typeof argument === "object" ? Object.keys(argument) : typeof argument === "string" ? argument.split("&").map(part => part.split("=")[0]).filter(Boolean) : ["$argument"];
-    return keys.filter(key => Object.prototype.hasOwnProperty.call(defaultSettings, key));
+    return typeof argument === "object" ? Object.keys(argument) : typeof argument === "string" ? argument.split("&").map(part => part.split("=")[0]).filter(Boolean) : ["$argument"];
+};
+
+// 记忆化返回：浅拷贝 Settings 外壳、全新 Caches: {} 与独立浅拷贝 Configs（含 Locale/i18n 的 Map 副本）。
+const buildMemoizedReturn = cached => {
+    const memoizedConfigs = { ...cached.Configs };
+    if (memoizedConfigs.Locale) memoizedConfigs.Locale = new Map(memoizedConfigs.Locale);
+    if (memoizedConfigs.i18n) {
+        memoizedConfigs.i18n = { ...memoizedConfigs.i18n };
+        for (const type in memoizedConfigs.i18n) memoizedConfigs.i18n[type] = new Map(memoizedConfigs.i18n[type]);
+    }
+    return { Settings: { ...cached.Settings }, Caches: {}, Configs: memoizedConfigs };
 };
 
 export default function setENV(name, platforms, database) {
     Console.info("☑️ Set Environment Variables");
+    if (
+        cachedDefaultEnv &&
+        cachedDefaultEnv.name === name &&
+        cachedDefaultEnv.platforms === platforms &&
+        cachedDefaultEnv.database === database &&
+        !argumentOverrideKeys().length &&
+        !Storage.getItem(name)
+    ) {
+        Console.info("✅ Set Environment Variables");
+        return buildMemoizedReturn(cachedDefaultEnv);
+    }
     const { Settings, Caches, Configs } = getStorage(name, platforms, database);
     if (Console.logLevel === "INFO" || Console.logLevel === "DEBUG" || Console.logLevel === "ALL") Console.info(`typeof Settings: ${typeof Settings}`, `Settings: ${JSON.stringify(Settings, null, 2)}`);
     string2array("DataSets");
@@ -33,16 +56,9 @@ export default function setENV(name, platforms, database) {
     if (Configs.Locale) Configs.Locale = new Map(Configs.Locale);
     if (Configs.i18n) for (const type in Configs.i18n) Configs.i18n[type] = new Map(Configs.i18n[type]);
     Console.info("✅ Set Environment Variables");
-    if (!argumentOverrideKeys(Settings).length && !Storage.getItem(name)) {
-        if (!cachedDefaultEnv) cachedDefaultEnv = { Settings, Configs };
-        const cached = cachedDefaultEnv;
-        const memoizedConfigs = { ...cached.Configs };
-        if (memoizedConfigs.Locale) memoizedConfigs.Locale = new Map(memoizedConfigs.Locale);
-        if (memoizedConfigs.i18n) {
-            memoizedConfigs.i18n = { ...memoizedConfigs.i18n };
-            for (const type in memoizedConfigs.i18n) memoizedConfigs.i18n[type] = new Map(memoizedConfigs.i18n[type]);
-        }
-        return { Settings: { ...cached.Settings }, Caches: {}, Configs: memoizedConfigs };
+    if (!argumentOverrideKeys().length && !Storage.getItem(name)) {
+        cachedDefaultEnv = { name, platforms, database, Settings, Configs };
+        return buildMemoizedReturn(cachedDefaultEnv);
     }
     return { Settings, Caches, Configs };
 
