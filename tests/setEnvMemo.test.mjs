@@ -77,3 +77,29 @@ test("setENV fast path skips getStorage on repeated default calls and bypasses c
     assert.ok(reads > beforeStore, "persistent-store override must bypass the fast path");
     globalThis.$persistentStore = undefined;
 });
+
+test("setENV fast path hits on production lowercase query string and bypasses on uppercase override key", () => {
+    let reads = 0;
+    const counted = new Proxy(database, {
+        get(target, prop, receiver) { reads++; return Reflect.get(target, prop, receiver); },
+        ownKeys(target) { reads++; return Reflect.ownKeys(target); },
+        getOwnPropertyDescriptor(target, prop) { reads++; return Reflect.getOwnPropertyDescriptor(target, prop); },
+    });
+    // 首次调用：与已缓存的 database 引用不同，未命中快速路径，必须读取 database。
+    const first = setENV("iRingo", "WeatherKit", counted);
+    const firstReads = reads;
+    assert.ok(firstReads > 0, `first call must read database, got ${firstReads}`);
+    // 生产查询字符串（仅小写原生参数）：第二次同参调用命中快速路径，零读取 database。
+    globalThis.$argument = "timezone=Asia/Shanghai&dataSets=airQuality,currentWeather&country=CN&relativeDailyStart=-1";
+    const second = setENV("iRingo", "WeatherKit", counted);
+    assert.equal(reads, firstReads, "second call with lowercase-only query string must not read database");
+    assert.deepEqual(second.Settings, first.Settings);
+    assert.notEqual(second.Settings, first.Settings, "each call must get its own Settings shell");
+    // 查询字符串中出现大写覆盖键 LogLevel：绕过快速路径，重新读取 database。
+    // 注：本地桩 getStorage 只合并对象形式 $argument，不解析字符串形式（真实 @nsnanocat/util 由 lib/argument.mjs 在 import 时经 qs.parse 归一化为对象），因此此处只断言绕过与重读，不断言覆盖值生效。
+    const beforeOverride = reads;
+    globalThis.$argument = "timezone=Asia/Shanghai&LogLevel=DEBUG";
+    setENV("iRingo", "WeatherKit", counted);
+    assert.ok(reads > beforeOverride, "uppercase override key must bypass the fast path");
+    globalThis.$argument = undefined;
+});

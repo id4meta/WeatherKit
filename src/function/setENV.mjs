@@ -14,13 +14,20 @@ import getStorage from "@nsnanocat/util/getStorage.mjs";
 // 每次返回浅拷贝外壳与全新的 Caches: {}，避免跨请求共享可变状态。
 let cachedDefaultEnv = null;
 
-// $argument（字符串或对象）中的键都会被 getStorage 合并进 Settings，包括默认 Settings 顶层
-// 不存在的键（如 LogLevel 只在 Default.Settings 中），因此须以全部 $argument 键为准；
-// 解析后复核时 Settings 已含全部 $argument 键，同一谓词行为不变。
+// 对象形式 $argument（单测/Surge）取全部键；字符串形式（Cloudflare Pages 路由传入 url.search.slice(1)）
+// 与 HonoWorkerAdapter.buildArgument 同口径，仅将大写字母开头的键视为插件 Settings 覆盖（如 LogLevel、DataSets），
+// 忽略苹果 WeatherKit 原生小写查询参数（timezone、dataSets、country 等），确保生产快速路径命中。
 const argumentOverrideKeys = () => {
     const argument = globalThis.$argument;
     if (!argument) return [];
-    return typeof argument === "object" ? Object.keys(argument) : typeof argument === "string" ? argument.split("&").map(part => part.split("=")[0]).filter(Boolean) : ["$argument"];
+    if (typeof argument === "object") return Object.keys(argument);
+    if (typeof argument === "string") {
+        return argument
+            .split("&")
+            .map(part => part.split("=")[0])
+            .filter(key => /^[A-Z]/.test(key));
+    }
+    return ["$argument"];
 };
 
 // 记忆化返回：浅拷贝 Settings 外壳、全新 Caches: {} 与独立浅拷贝 Configs（含 Locale/i18n 的 Map 副本）。
