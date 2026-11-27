@@ -305,6 +305,11 @@ test("GetWeatherAlerts rejects alert ids containing path traversal", async () =>
         const { $response } = await Request({ headers: {}, method: "GET", url: "https://weatherkit.apple.com/api/v1/weatherAlerts?ids=linfen-101100701&lang=zh-CN" });
         assert.equal(fetchCalls.length, 1, "a valid id must reach the alert page fetcher");
         assert.ok(fetchCalls[0].includes("linfen-101100701"), `fetch must target the linfen page, got ${fetchCalls[0]}`);
+        fetchCalls.length = 0;
+        const { $response: apostropheResponse } = await Request({ headers: {}, method: "GET", url: "https://weatherkit.apple.com/api/v1/weatherAlerts?ids=jian'an-101180407&lang=zh-CN" });
+        assert.equal(apostropheResponse.body, "[]", "an id with an apostrophe (jian'an) must be allowed through");
+        assert.equal(fetchCalls.length, 1, "an id with an apostrophe must reach the alert page fetcher");
+        assert.ok(fetchCalls[0].includes("jian'an-101180407"), `fetch must target the jian'an page, got ${fetchCalls[0]}`);
     } finally {
         globalThis.fetch = originalFetch;
     }

@@ -191,7 +191,7 @@ async function GetWeatherAlerts(identifier, parameters, Settings, headers, waitU
     let body = [];
     try {
         switch (true) {
-            case /^[a-z0-9-]+-[0-9]{9}$/i.test(identifier): {
+            case /^[a-z0-9'-]+-[0-9]{9}$/i.test(identifier): {
                 Console.info("☑️ QWeather.FetchWeatherAlertPage", `ids: ${identifier}`);
                 const source = await QWeather.FetchWeatherAlertPage(identifier, parameters.language, headers, waitUntil);
                 body = WeatherAlerts.Build(source, {
