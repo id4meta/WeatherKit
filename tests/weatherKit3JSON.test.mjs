@@ -246,6 +246,47 @@ test("WARN-level CN request does not instantiate MatchEnum, QWeather or WAQI", a
     assert.equal(seen.some(line => line.includes("WAQI")), false, `WAQI must stay lazy for a pure-Caiyun request, got ${JSON.stringify(seen)}`);
 });
 
+test("empty weatherAlerts skips QWeather fetch and passes through; non-empty alerts still merge", async t => {
+    globalThis.$argument.DataSets = ["weatherAlerts"];
+    let allowFetch = false;
+    const web = t.mock.method(QWeather.prototype, "WeatherAlertWeb", async () => {
+        if (!allowFetch) assert.fail("empty alerts must not fetch the QWeather alert page");
+        return {
+            metadata: { providerName: "和风天气" },
+            detailsUrl: "https://weatherkit.apple.com/alertDetails/index.html?ids=jianye-101190110&lang=zh-CN&party=qweather",
+            alerts: [{ id: "merged-1", description: "merged" }],
+        };
+    });
+    const seen = [];
+    const originalLog = console.log;
+    const originalFetch = globalThis.fetch;
+    console.log = (...args) => {
+        seen.push(args.join(" "));
+    };
+    globalThis.fetch = () => assert.fail("empty alerts must not make any network request");
+    const detailsUrl = "https://www.qweather.com/severe-weather/jianye-101190110.html?from=AppleWeatherService";
+    try {
+        const empty = appleBody();
+        empty.weatherAlerts = { metadata, detailsUrl, alerts: [] };
+        const emptyOut = JSON.parse((await Response(request("weatherAlerts"), response(empty))).body);
+        assert.deepEqual(emptyOut.weatherAlerts.alerts, []);
+        assert.equal(emptyOut.weatherAlerts.detailsUrl, detailsUrl);
+        assert.equal(emptyOut.weatherAlerts.metadata.providerName, "Apple");
+        assert.equal(web.mock.callCount(), 0);
+        assert.equal(seen.some(line => line.includes("QWeather")), false, `QWeather must stay lazy for empty alerts, got ${JSON.stringify(seen)}`);
+        allowFetch = true;
+        seen.length = 0;
+        const one = appleBody();
+        one.weatherAlerts = { metadata, detailsUrl, alerts: [{ id: "00010203-0405-0607-0809-0a0b0c0d0e0f", description: "Apple alert" }] };
+        const oneOut = JSON.parse((await Response(request("weatherAlerts"), response(one))).body);
+        assert.equal(web.mock.callCount(), 1);
+        assert.equal(oneOut.weatherAlerts.alerts[0].id, "00010203-0405-0607-0809-0a0b0c0d0e0f");
+    } finally {
+        console.log = originalLog;
+        globalThis.fetch = originalFetch;
+    }
+});
+
 test("Response reuses $request._wkContext instead of re-parsing the request URL", async t => {
     t.mock.method(ColorfulClouds.prototype, "CurrentWeather", async () => ({ metadata: { providerName: "彩云天气" }, temperature: 27 }));
     const { Request } = await import("../src/process/Request.mjs");

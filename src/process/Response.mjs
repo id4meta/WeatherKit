@@ -806,8 +806,9 @@ async function InjectForecastNextHour(forecastNextHour, Settings, enviroments) {
  */
 async function InjectWeatherAlerts(weatherAlerts, Settings, enviroments) {
     Console.info("☑️ InjectWeatherAlerts");
-    // 仅在已有集合上合并；无集合时不创建，直接返回 / Merge only onto an existing collection; never create one.
-    if (!weatherAlerts) return weatherAlerts;
+    // 仅在已有非空预警集合上合并；无集合或无活跃预警时不拉取外部预警页，直接返回
+    // Merge only onto a non-empty collection; skip external alert fetches when alerts is empty.
+    if (!weatherAlerts || !Array.isArray(weatherAlerts.alerts) || weatherAlerts.alerts.length === 0) return weatherAlerts;
     const isNationalWarningCenter = ["国家预警信息发布中心", "國家預警信息發布中心", "National Early Warning Center"].includes(weatherAlerts?.metadata?.providerName);
     let newWeatherAlerts;
     switch (Settings?.WeatherAlerts?.Provider) {
