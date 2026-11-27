@@ -10,6 +10,7 @@ import { resolveCountryForResponse } from "./Response.mjs";
 
 // /api/v1/airQualityScale/ 静态构建响应缓存：key `${language}:${scaleName}`。
 const airQualityScaleCache = new Map();
+const MAX_SCALE_CACHE_ENTRIES = 32;
 /***************** Processing *****************/
 export async function Request($request) {
     // 构造回复数据
@@ -116,7 +117,13 @@ export async function Request($request) {
                                                 if (cachedScale) $response = cachedScale;
                                                 else {
                                                     $response = new AirQualityScale().Build(language, scaleName);
-                                                    if ($response) airQualityScaleCache.set(scaleCacheKey, $response);
+                                                    if ($response) {
+                                                        if (airQualityScaleCache.has(scaleCacheKey)) airQualityScaleCache.delete(scaleCacheKey);
+                                                        airQualityScaleCache.set(scaleCacheKey, $response);
+                                                        while (airQualityScaleCache.size > MAX_SCALE_CACHE_ENTRIES) {
+                                                            airQualityScaleCache.delete(airQualityScaleCache.keys().next().value);
+                                                        }
+                                                    }
                                                 }
                                                 break;
                                             }

@@ -268,3 +268,23 @@ test("availability keeps Apple's capabilities and appends plugin requirements in
         assert.deepEqual(JSON.parse(response.body), expected);
     }
 });
+
+test("request bounds the air-quality scale cache at 32 entries", async t => {
+    const build = t.mock.method(AirQualityScale.prototype, "Build", function (language, scaleName) {
+        return { status: 200, headers: { "Content-Type": "application/json; charset=utf-8" }, body: JSON.stringify({ name: scaleName, language }) };
+    });
+    const languages = Array.from({ length: 33 }, (_, i) => `xx-${String(i).padStart(2, "0")}`);
+    const responses = [];
+    for (const language of languages) {
+        const { $response } = await Request({ headers: {}, method: "GET", url: `https://weatherkit.apple.com/api/v1/airQualityScale/${language}/HK.AQHI.2414` });
+        assert.equal($response.status, 200);
+        responses.push($response);
+    }
+    assert.equal(build.mock.callCount(), 33, "each distinct language:scale must build once");
+    const firstAgain = await Request({ headers: {}, method: "GET", url: `https://weatherkit.apple.com/api/v1/airQualityScale/${languages[0]}/HK.AQHI.2414` });
+    assert.notEqual(firstAgain.$response, responses[0], "the earliest entry must have been evicted past 32 entries");
+    assert.equal(build.mock.callCount(), 34, "evicted entry must rebuild");
+    const lastAgain = await Request({ headers: {}, method: "GET", url: `https://weatherkit.apple.com/api/v1/airQualityScale/${languages[32]}/HK.AQHI.2414` });
+    assert.equal(lastAgain.$response, responses[32], "the newest entry must still be cached");
+    assert.equal(build.mock.callCount(), 34, "cached newest entry must not rebuild");
+});

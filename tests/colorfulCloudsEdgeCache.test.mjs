@@ -653,3 +653,53 @@ test("prefetchWeather semi-warm race: un-awaited prefetch plus 6 concurrent call
         globalThis.caches = originalCaches;
     }
 });
+
+test("CurrentAirQuality returns the temporarilyUnavailable fallback when air_quality is missing", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalCaches = globalThis.caches;
+    globalThis.fetch = async () => new Response(JSON.stringify(realtimeResponse(20)));
+    globalThis.caches = undefined;
+    try {
+        const result = await newInstance().CurrentAirQuality(false, true);
+        assert.equal(result.metadata.temporarilyUnavailable, true, "missing air_quality must degrade to the fallback");
+        assert.deepEqual(result.pollutants, []);
+        assert.equal(result.index, undefined, "fallback carries no index");
+    } finally {
+        globalThis.fetch = originalFetch;
+        globalThis.caches = originalCaches;
+    }
+});
+
+test("CurrentAirQuality returns the temporarilyUnavailable fallback when the usa description is empty", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalCaches = globalThis.caches;
+    const body = realtimeResponse(20);
+    body.result.realtime.air_quality = { description: { usa: "", chn: "" }, aqi: { usa: 60, chn: 50 }, obs_time: 1795415760 };
+    globalThis.fetch = async () => new Response(JSON.stringify(body));
+    globalThis.caches = undefined;
+    try {
+        const result = await newInstance().CurrentAirQuality(false, true);
+        assert.equal(result.metadata.temporarilyUnavailable, true, "empty usa description must degrade to the fallback");
+        assert.deepEqual(result.pollutants, []);
+    } finally {
+        globalThis.fetch = originalFetch;
+        globalThis.caches = originalCaches;
+    }
+});
+
+test("YesterdayAirQuality returns the temporarilyUnavailable fallback when aqi is empty", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalCaches = globalThis.caches;
+    const body = { status: "ok", result: { server_time: 1795415760, location: [114.06, 22.54], hourly: { status: "ok", air_quality: { aqi: [] } } } };
+    globalThis.fetch = async () => new Response(JSON.stringify(body));
+    globalThis.caches = undefined;
+    try {
+        const result = await newInstance().YesterdayAirQuality();
+        assert.equal(result.metadata.temporarilyUnavailable, true, "empty aqi must degrade to the fallback");
+        assert.equal(result.categoryIndex, -1);
+        assert.equal(result.index, undefined, "fallback carries no index");
+    } finally {
+        globalThis.fetch = originalFetch;
+        globalThis.caches = originalCaches;
+    }
+});

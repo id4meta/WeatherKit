@@ -104,7 +104,7 @@ export async function Response($request, $response) {
                                     const enviroments = {
                                         colorfulClouds: $request?._prefetchedColorfulClouds ?? new ColorfulClouds(providerParameters, Settings?.API?.ColorfulClouds?.Token || "Y2FpeXVuX25vdGlmeQ=="),
                                         get qWeather() {
-                                            return (this._qWeather ??= new QWeather(providerParameters, Settings?.API?.QWeather?.Token || "bdd98ec1d87747f3a2e8b1741a5af796", Settings?.API?.QWeather?.Host));
+                                            return (this._qWeather ??= new QWeather(providerParameters, Settings?.API?.QWeather?.Token || "bdd98ec1d87747f3a2e8b1741a5af796", Settings?.API?.QWeather?.Host, $request?._waitUntil));
                                         },
                                         get waqi() {
                                             return (this._waqi ??= new WAQI(parameters, Settings?.API?.WAQI?.Token));
@@ -220,7 +220,7 @@ export async function Response($request, $response) {
                                     const enviroments = {
                                         colorfulClouds: $request?._prefetchedColorfulClouds ?? new ColorfulClouds(providerParameters, Settings?.API?.ColorfulClouds?.Token || "Y2FpeXVuX25vdGlmeQ=="),
                                         get qWeather() {
-                                            return (this._qWeather ??= new QWeather(providerParameters, Settings?.API?.QWeather?.Token || "bdd98ec1d87747f3a2e8b1741a5af796", Settings?.API?.QWeather?.Host));
+                                            return (this._qWeather ??= new QWeather(providerParameters, Settings?.API?.QWeather?.Token || "bdd98ec1d87747f3a2e8b1741a5af796", Settings?.API?.QWeather?.Host, $request?._waitUntil));
                                         },
                                         get waqi() {
                                             return (this._waqi ??= new WAQI(parameters, Settings?.API?.WAQI?.Token));
@@ -325,7 +325,7 @@ export async function Response($request, $response) {
                                     const enviroments = {
                                         colorfulClouds: $request?._prefetchedColorfulClouds ?? new ColorfulClouds(providerParameters, Settings?.API?.ColorfulClouds?.Token || "Y2FpeXVuX25vdGlmeQ=="),
                                         get qWeather() {
-                                            return (this._qWeather ??= new QWeather(providerParameters, Settings?.API?.QWeather?.Token || "bdd98ec1d87747f3a2e8b1741a5af796", Settings?.API?.QWeather?.Host));
+                                            return (this._qWeather ??= new QWeather(providerParameters, Settings?.API?.QWeather?.Token || "bdd98ec1d87747f3a2e8b1741a5af796", Settings?.API?.QWeather?.Host, $request?._waitUntil));
                                         },
                                         get waqi() {
                                             return (this._waqi ??= new WAQI(parameters, Settings?.API?.WAQI?.Token));
@@ -376,9 +376,13 @@ export async function Response($request, $response) {
                                                     if (Settings?.LogLevel === "DEBUG" || Settings?.LogLevel === "ALL") {
                                                         matchEnum.airQuality();
                                                     }
-                                                    const airQualityResult = await InjectAirQuality(body.airQuality, Settings, Caches, enviroments);
-                                                    if (airQualityResult !== undefined) patch.airQuality = airQualityResult;
-                                                    else delete patch.airQuality;
+                                                    try {
+                                                        const airQualityResult = await InjectAirQuality(body.airQuality, Settings, Caches, enviroments);
+                                                        if (airQualityResult !== undefined) patch.airQuality = airQualityResult;
+                                                        else delete patch.airQuality;
+                                                    } catch (error) {
+                                                        Console.warn("WeatherKit.api.v3.weather", `preserved airQuality: ${error?.name ?? "Error"}`);
+                                                    }
                                                     break;
                                                 }
                                                 case "forecastNextHour": {

@@ -7,12 +7,13 @@ import Weather from "./Weather.mjs";
 export default class QWeather {
     static #MaximumWeatherAlertPageSize = 2 * 1024 * 1024;
 
-    constructor(parameters, token, host = "devapi.qweather.com") {
+    constructor(parameters, token, host = "devapi.qweather.com", waitUntil) {
         this.Name = "QWeather";
         this.Version = "5.3.1";
         Console.log(`🟧 ${this.Name} v${this.Version}`);
         this.endpoint = `https://${host}`;
         this.headers = { "X-QW-Api-Key": token };
+        this.waitUntil = typeof waitUntil === "function" ? waitUntil : undefined;
         this.version = parameters.version;
         this.language =
             this.#Config.Language[
@@ -657,7 +658,7 @@ export default class QWeather {
         };
         let weatherAlerts = failedWeatherAlerts;
         try {
-            weatherAlerts = { ...failedWeatherAlerts, ...(await QWeather.FetchWeatherAlertPage(identifier, this.weatherKitLanguage)) };
+            weatherAlerts = { ...failedWeatherAlerts, ...(await QWeather.FetchWeatherAlertPage(identifier, this.weatherKitLanguage, {}, this.waitUntil)) };
         } catch (error) {
             Console.error(`WeatherAlertWeb: ${error}`);
         } finally {

@@ -22,9 +22,9 @@ const l1Get = cacheKey => {
     l1Cache.set(cacheKey, entry);
     return entry;
 };
-const l1Set = (cacheKey, body, softTtlMs, hardTtlMs) => {
+const l1Set = (cacheKey, body, softTtlMs, hardTtlMs, cachedAt = Date.now()) => {
     if (l1Cache.has(cacheKey)) l1Cache.delete(cacheKey);
-    l1Cache.set(cacheKey, { body, cachedAt: Date.now(), softTtlMs, hardTtlMs });
+    l1Cache.set(cacheKey, { body, cachedAt, softTtlMs, hardTtlMs });
     while (l1Cache.size > MAX_L1_ENTRIES) {
         l1Cache.delete(l1Cache.keys().next().value);
     }
@@ -255,11 +255,11 @@ export default class ColorfulClouds {
                         const cachedAt = cachedAtHeader === null || cachedAtHeader === undefined ? NaN : Number(cachedAtHeader);
                         const age = Number.isFinite(cachedAt) ? Date.now() - cachedAt : 0;
                         if (age < softTtlMs) {
-                            l1Set(cacheKey, parsed, softTtlMs, hardTtlMs);
+                            l1Set(cacheKey, parsed, softTtlMs, hardTtlMs, Number.isFinite(cachedAt) ? cachedAt : Date.now());
                             return parsed;
                         }
                         if (age < hardTtlMs && softTtlMs < hardTtlMs) {
-                            l1Set(cacheKey, parsed, softTtlMs, hardTtlMs);
+                            l1Set(cacheKey, parsed, softTtlMs, hardTtlMs, Number.isFinite(cachedAt) ? cachedAt : Date.now());
                             this.#TriggerSwr(cacheKey, hardTtlSeconds, softTtlSeconds, fetcher, subfield);
                             return parsed;
                         }
@@ -459,7 +459,7 @@ export default class ColorfulClouds {
                         const cachedAt = cachedAtHeader === null || cachedAtHeader === undefined ? NaN : Number(cachedAtHeader);
                         const age = Number.isFinite(cachedAt) ? Date.now() - cachedAt : 0;
                         if (age < hardTtlMs) {
-                            l1Set(cacheKey, parsed, softTtlMs, hardTtlMs);
+                            l1Set(cacheKey, parsed, softTtlMs, hardTtlMs, Number.isFinite(cachedAt) ? cachedAt : Date.now());
                             if (age >= softTtlMs) this.#TriggerSwr(cacheKey, hardTtlMs / 1000, softTtlMs / 1000, swrFetcher, kind);
                             return parsed;
                         }
@@ -1134,23 +1134,24 @@ export default class ColorfulClouds {
             return failedAirQuality;
         }
 
-        // 彩云在不支持位置时 usa 描述为空字符串。
-        if (realtime.result.realtime.air_quality.description.usa === "") {
+        // 彩云在不支持位置时 usa 描述为空字符串；air_quality 缺失时同样视为不可用。
+        const airQualityData = realtime.result?.realtime?.air_quality;
+        if (!airQualityData || airQualityData.description?.usa === "") {
             Console.error("CurrentAirQuality", `不支持的位置`);
             return failedAirQuality;
         }
 
         // 构建与算法无关的基础空气质量结构。
         const particularAirQuality = {
-            metadata: this.#Metadata(realtime.result.realtime.air_quality.obs_time, realtime.location),
-            pollutants: this.#CreatePollutants(realtime.result.realtime.air_quality, useUsa ? undefined : "HJ6332012"),
+            metadata: this.#Metadata(airQualityData.obs_time, realtime.location),
+            pollutants: this.#CreatePollutants(airQualityData, useUsa ? undefined : "HJ6332012"),
             previousDayComparison: AirQuality.Config.CompareCategoryIndexes.UNKNOWN,
         };
 
         // US 口径：直接使用 usa AQI，并按 EPA_NowCast 分类。
         if (useUsa) {
             const scale = AirQuality.Config.Scales.EPA_NowCast;
-            const index = realtime.result.realtime.air_quality.aqi.usa;
+            const index = airQualityData.aqi?.usa;
             const categoryIndex = AirQuality.CategoryIndex(index, scale.categories);
 
             const airQuality = {
@@ -1166,7 +1167,7 @@ export default class ColorfulClouds {
         } else {
             // CN 口径：使用 chn AQI，并基于分污染物 IAQI 判定主污染物。
             const scale = AirQuality.Config.Scales.HJ6332012;
-            const index = realtime.result.realtime.air_quality.aqi.chn;
+            const index = airQualityData.aqi?.chn;
             const categoryIndex = AirQuality.CategoryIndex(index, scale.categories);
 
             const primaryPollutant = AirQuality.PrimaryPollutant(particularAirQuality.pollutants, scale.categories);
@@ -1241,8 +1242,16 @@ export default class ColorfulClouds {
             };
         }
 
-        const aqi = yesterdayHourly.result.hourly.air_quality.aqi;
-        const targetEntry = aqi.find(item => Date.parse(item?.datetime) / 1000 === targetHourTs) ?? aqi[0];
+        const aqi = yesterdayHourly.result?.hourly?.air_quality?.aqi;
+        const targetEntry = Array.isArray(aqi) ? (aqi.find(item => Date.parse(item?.datetime) / 1000 === targetHourTs) ?? aqi[0]) : undefined;
+        if (!targetEntry?.value) {
+            Console.error("YesterdayAirQuality", "无法获取aqi数据");
+            return {
+                ...particularAirQuality,
+                categoryIndex: -1,
+                metadata: this.#Metadata(undefined, undefined, true),
+            };
+        }
         const { usa, chn } = targetEntry.value;
         if (usa === 0 && chn === 0) {
             Console.warn("YesterdayAirQuality", "usa和chn的AQI值都为0，不支持的位置？");

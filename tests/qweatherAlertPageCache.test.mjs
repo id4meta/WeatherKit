@@ -145,3 +145,27 @@ test("FetchWeatherAlertPage times out after 4000ms", async () => {
         globalThis.caches = originalCaches;
     }
 });
+
+test("WeatherAlertWeb passes waitUntil through to FetchWeatherAlertPage for non-blocking cache writes", async () => {
+    const { default: QWeather } = await import("../src/class/QWeather.mjs");
+    const originalFetch = globalThis.fetch;
+    const originalCaches = globalThis.caches;
+    const mockCache = createMockCache();
+    globalThis.caches = { default: mockCache };
+    globalThis.fetch = async () => new Response(alertPageHtml, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+    const waitUntilCalls = [];
+    try {
+        const provider = new QWeather({ country: "CN", language: "zh-CN", latitude: "32.115", longitude: "118.814" }, "test-token", undefined, promise => {
+            waitUntilCalls.push(promise);
+        });
+        const result = await provider.WeatherAlertWeb("https://www.qweather.com/severe-weather/jianye-101190110.html?from=AppleWeatherService");
+        assert.equal(result.alerts.length, 1);
+        assert.equal(waitUntilCalls.length, 1, "cache write must be handed to the instance waitUntil");
+        await waitUntilCalls[0];
+        assert.equal(mockCache.putCalls.length, 1, "cache write must complete via waitUntil");
+        assert.equal(mockCache.putCalls[0].url, "https://cache.internal/qweather/alert-page/jianye-101190110?lang=zh-CN");
+    } finally {
+        globalThis.fetch = originalFetch;
+        globalThis.caches = originalCaches;
+    }
+});

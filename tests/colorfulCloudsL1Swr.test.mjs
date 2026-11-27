@@ -354,3 +354,41 @@ test("realtime past hard expiry re-fetches instead of serving stale data", async
         globalThis.caches = originalCaches;
     }
 });
+
+test("L2 realtime entry keeps its real age when backfilled into L1 and re-fetches once past hard expiry", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalCaches = globalThis.caches;
+    const originalDateNow = Date.now;
+    const mockCache = createMockCache();
+    const T0 = Date.now();
+    let fakeNow = T0;
+    Date.now = () => fakeNow;
+    mockCache.store.set("https://cache.internal/caiyun/v2.6/realtime/114.06,22.54?lang=zh_CN", {
+        text: JSON.stringify(realtimeResponse(10)),
+        headers: { "cache-control": "public, max-age=120", "x-cached-at": String(T0 - 115 * 1000) },
+    });
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+        fetchCalls++;
+        return new Response(JSON.stringify(realtimeResponse(20)));
+    };
+    globalThis.caches = { default: mockCache };
+    try {
+        const first = await newInstance().CurrentWeather();
+        assert.equal(first.temperature, 10, "115s-old L2 entry must serve immediately");
+        assert.equal(fetchCalls, 0, "L2 hit must not fetch upstream");
+        assert.equal(mockCache.matchCalls, 1, "first call must consult L2 once");
+        const second = await newInstance().CurrentWeather();
+        assert.equal(second.temperature, 10, "same-time second call must serve the backfilled L1 entry");
+        assert.equal(fetchCalls, 0, "L1 hit must not fetch upstream");
+        assert.equal(mockCache.matchCalls, 1, "L1 hit must not consult L2 again, proving the backfill happened");
+        fakeNow = T0 + 6 * 1000;
+        const third = await newInstance().CurrentWeather();
+        assert.equal(third.temperature, 20, "entry past its real 120s hard expiry must come from upstream, not a renewed L1");
+        assert.equal(fetchCalls, 1, "expired entry must re-fetch exactly once");
+    } finally {
+        Date.now = originalDateNow;
+        globalThis.fetch = originalFetch;
+        globalThis.caches = originalCaches;
+    }
+});
