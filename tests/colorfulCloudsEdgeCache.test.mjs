@@ -703,3 +703,101 @@ test("YesterdayAirQuality returns the temporarilyUnavailable fallback when aqi i
         globalThis.caches = originalCaches;
     }
 });
+
+test("CurrentWeather reads top-level server_time and falls back to result.server_time", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalCaches = globalThis.caches;
+    globalThis.caches = undefined;
+    try {
+        const topLevel = { ...realtimeResponse(20), server_time: 1795415000 };
+        globalThis.fetch = async () => new Response(JSON.stringify(topLevel));
+        const withTopLevel = await newInstance().CurrentWeather();
+        assert.equal(withTopLevel.metadata.reportedTime, 1795415000, "top-level server_time must win over result.server_time");
+        ColorfulClouds.clearL1Cache();
+        globalThis.fetch = async () => new Response(JSON.stringify(realtimeResponse(20)));
+        const fallback = await newInstance().CurrentWeather();
+        assert.equal(fallback.metadata.reportedTime, 1795415760, "missing top-level server_time must fall back to result.server_time");
+    } finally {
+        globalThis.fetch = originalFetch;
+        globalThis.caches = originalCaches;
+    }
+});
+
+test("ForecastHourly reads top-level server_time", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalCaches = globalThis.caches;
+    globalThis.caches = undefined;
+    const hourlyBody = { status: "ok", server_time: 1795415000, location: [114.06, 22.54], result: { hourly: hourlyModule(1795415760, 273) } };
+    globalThis.fetch = async () => new Response(JSON.stringify(hourlyBody));
+    try {
+        const result = await newInstance().ForecastHourly(273, 1795415760);
+        assert.equal(result.hours.length, 273);
+        assert.equal(result.metadata.reportedTime, 1795415000, "top-level server_time must be used, not Date.now()");
+    } finally {
+        globalThis.fetch = originalFetch;
+        globalThis.caches = originalCaches;
+    }
+});
+
+test("YesterdayAirQuality reads top-level server_time", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalCaches = globalThis.caches;
+    globalThis.caches = undefined;
+    const targetTs = Math.trunc((Date.now() - 864e5) / 1000);
+    const targetHourTs = Math.floor(targetTs / 3600) * 3600;
+    const hourlyBody = { status: "ok", server_time: 1795415000, location: [114.06, 22.54], result: { hourly: hourlyModule(targetHourTs, 1) } };
+    globalThis.fetch = async () => new Response(JSON.stringify(hourlyBody));
+    try {
+        const result = await newInstance().YesterdayAirQuality();
+        assert.equal(result.index, 100);
+        assert.equal(result.metadata.reportedTime, 1795415000, "top-level server_time must be used, not Date.now()");
+    } finally {
+        globalThis.fetch = originalFetch;
+        globalThis.caches = originalCaches;
+    }
+});
+
+test("CurrentWeather windDirection is undefined for null or empty direction instead of 0", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalCaches = globalThis.caches;
+    globalThis.caches = undefined;
+    try {
+        for (const [direction, expected] of [[null, undefined], ["", undefined], [90, 90]]) {
+            const body = realtimeResponse(20);
+            body.result.realtime.wind.direction = direction;
+            globalThis.fetch = async () => new Response(JSON.stringify(body));
+            const result = await newInstance().CurrentWeather();
+            assert.equal(result.windDirection, expected, `direction ${JSON.stringify(direction)} must map to ${expected}`);
+            ColorfulClouds.clearL1Cache();
+        }
+    } finally {
+        globalThis.fetch = originalFetch;
+        globalThis.caches = originalCaches;
+    }
+});
+
+test("Hourly with 1 step does not overwrite the cached 273h series", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalCaches = globalThis.caches;
+    globalThis.caches = undefined;
+    const router = createRoutingFetch([
+        { match: url => url.includes("hourlysteps=273&"), body: () => ({ status: "ok", server_time: 1795415760, location: [114.06, 22.54], result: { hourly: hourlyModule(1795415760, 273) } }) },
+        { match: url => url.includes("hourlysteps=1&"), body: () => ({ status: "ok", server_time: 1795415760, location: [114.06, 22.54], result: { hourly: hourlyModule(1794998400, 1) } }) },
+    ]);
+    globalThis.fetch = router.fetch;
+    try {
+        const cc = newInstance();
+        const first = await cc.ForecastHourly(273, 1795415760);
+        assert.equal(first.hours.length, 273);
+        assert.equal(router.calls.length, 1);
+        const short = await cc.ForecastHourly(1, 1795000000);
+        assert.equal(short.hours.length, 1);
+        assert.equal(router.calls.length, 2);
+        const second = await cc.ForecastHourly(273, 1795415760);
+        assert.equal(second.hours.length, 273);
+        assert.equal(router.calls.length, 2, "the 1h query must not overwrite the 273h cache");
+    } finally {
+        globalThis.fetch = originalFetch;
+        globalThis.caches = originalCaches;
+    }
+});

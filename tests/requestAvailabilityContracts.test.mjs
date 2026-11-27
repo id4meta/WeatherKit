@@ -288,3 +288,24 @@ test("request bounds the air-quality scale cache at 32 entries", async t => {
     assert.equal(lastAgain.$response, responses[32], "the newest entry must still be cached");
     assert.equal(build.mock.callCount(), 34, "cached newest entry must not rebuild");
 });
+
+test("GetWeatherAlerts rejects alert ids containing path traversal", async () => {
+    const originalFetch = globalThis.fetch;
+    const fetchCalls = [];
+    globalThis.fetch = async input => {
+        fetchCalls.push(typeof input === "string" ? input : (input?.url ?? ""));
+        return new Response("<html></html>", { headers: { "Content-Type": "text/html; charset=utf-8" } });
+    };
+    try {
+        for (const malicious of ["..%2F..%2Flinfen-101100701", "..-101100701", "a/b-101100701"]) {
+            const { $response } = await Request({ headers: {}, method: "GET", url: `https://weatherkit.apple.com/api/v1/weatherAlerts?ids=${malicious}&lang=zh-CN` });
+            assert.equal($response.body, "[]", `malicious id ${malicious} must not reach the alert page fetcher`);
+        }
+        assert.equal(fetchCalls.length, 0, "rejected ids must not fetch anything");
+        const { $response } = await Request({ headers: {}, method: "GET", url: "https://weatherkit.apple.com/api/v1/weatherAlerts?ids=linfen-101100701&lang=zh-CN" });
+        assert.equal(fetchCalls.length, 1, "a valid id must reach the alert page fetcher");
+        assert.ok(fetchCalls[0].includes("linfen-101100701"), `fetch must target the linfen page, got ${fetchCalls[0]}`);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});

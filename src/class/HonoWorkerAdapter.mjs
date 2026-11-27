@@ -136,14 +136,8 @@ export default class HonoWorkerAdapter {
      * @returns {WorkerHeaders} 清理后的响应头 / Cleaned response headers.
      */
     static cleanupResponseHeaders(headers = {}) {
-        const normalizedHeaders = { ...headers };
-        delete normalizedHeaders["Content-Encoding"];
-        delete normalizedHeaders["content-encoding"];
-        delete normalizedHeaders["Content-Length"];
-        delete normalizedHeaders["content-length"];
-        delete normalizedHeaders["Transfer-Encoding"];
-        delete normalizedHeaders["transfer-encoding"];
-        return normalizedHeaders;
+        const skip = new Set(["content-encoding", "content-length", "transfer-encoding"]);
+        return Object.fromEntries(Object.entries(headers).filter(([key]) => !skip.has(key.toLowerCase())));
     }
 
     /**

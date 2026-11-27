@@ -785,7 +785,7 @@ export default class ColorfulClouds {
                 case "ok":
                     switch (body?.result?.hourly?.status) {
                         case "ok": {
-                            this.#cache.hourly = body;
+                            if (Number(hourlysteps) > 24) this.#cache.hourly = body;
                             Console.info("✅ Hourly");
                             return body;
                         }
@@ -1014,6 +1014,7 @@ export default class ColorfulClouds {
     }
 
     #RoundUInt(value, min = 0, max = 65535) {
+        if (value === null || value === undefined || value === "") return undefined;
         const n = Number(value);
         if (!Number.isFinite(n)) return undefined;
         return Math.min(max, Math.max(min, Math.round(n)));
@@ -1203,7 +1204,7 @@ export default class ColorfulClouds {
         const precipitationIntensity = Math.trunc((realtime.result.realtime.precipitation?.local?.intensity ?? 0) * 1000000) / 1000000;
         Console.info("✅ CurrentWeather");
         return {
-            metadata: this.#Metadata(realtime.result.server_time, realtime.location, false, 5 * 60),
+            metadata: this.#Metadata(realtime.server_time ?? realtime.result.server_time, realtime.location, false, 5 * 60),
             cloudCover: Math.round(realtime.result.realtime.cloudrate * 100),
             ...Weather.ConvertWeatherCodeField(realtime.result.realtime.skycon),
             humidity: Math.round(realtime.result.realtime.humidity * 100),
@@ -1268,7 +1269,7 @@ export default class ColorfulClouds {
             index,
             categoryIndex,
             isSignificant,
-            metadata: this.#Metadata(yesterdayHourly.result.server_time, yesterdayHourly.location),
+            metadata: this.#Metadata(yesterdayHourly.server_time ?? yesterdayHourly.result.server_time, yesterdayHourly.location),
         };
     }
 
@@ -1285,7 +1286,7 @@ export default class ColorfulClouds {
         const isHourlyProbPercent = this.#IsPercentProbabilityScale(hourly.result.hourly.precipitation.map(item => item?.probability));
         Console.info("✅ ForecastHourly");
         return {
-            metadata: this.#Metadata(hourly.result.server_time, hourly.location),
+            metadata: this.#Metadata(hourly.server_time ?? hourly.result.server_time, hourly.location),
             hours: Array.from({ length: hourly.result.hourly.skycon.length }, (_, i) => ({
                 cloudCover: scaleFinite(hourly.result.hourly.cloudrate?.[i]?.value, 100, true),
                 // cloudCoverHighAltPct: 0, // Not given

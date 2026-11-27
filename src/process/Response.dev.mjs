@@ -102,7 +102,7 @@ export async function Response($request, $response) {
                                     // REST JSON 表示沿用标量形状，供应商按标量产出 / REST JSON uses scalar shapes, so providers produce scalars.
                                     const providerParameters = { ...parameters, version: "v2", weatherKitLanguage: body.weatherAlerts?.metadata?.language };
                                     const enviroments = {
-                                        colorfulClouds: $request?._prefetchedColorfulClouds ?? new ColorfulClouds(providerParameters, Settings?.API?.ColorfulClouds?.Token || "Y2FpeXVuX25vdGlmeQ=="),
+                                        colorfulClouds: $request?._prefetchedColorfulClouds?.version === "v2" ? $request._prefetchedColorfulClouds : new ColorfulClouds(providerParameters, Settings?.API?.ColorfulClouds?.Token || "Y2FpeXVuX25vdGlmeQ==", $request?._waitUntil),
                                         get qWeather() {
                                             return (this._qWeather ??= new QWeather(providerParameters, Settings?.API?.QWeather?.Token || "bdd98ec1d87747f3a2e8b1741a5af796", Settings?.API?.QWeather?.Host, $request?._waitUntil));
                                         },
@@ -218,7 +218,7 @@ export async function Response($request, $response) {
                                         await matchEnum.init();
                                     }
                                     const enviroments = {
-                                        colorfulClouds: $request?._prefetchedColorfulClouds ?? new ColorfulClouds(providerParameters, Settings?.API?.ColorfulClouds?.Token || "Y2FpeXVuX25vdGlmeQ=="),
+                                        colorfulClouds: $request?._prefetchedColorfulClouds ?? new ColorfulClouds(providerParameters, Settings?.API?.ColorfulClouds?.Token || "Y2FpeXVuX25vdGlmeQ==", $request?._waitUntil),
                                         get qWeather() {
                                             return (this._qWeather ??= new QWeather(providerParameters, Settings?.API?.QWeather?.Token || "bdd98ec1d87747f3a2e8b1741a5af796", Settings?.API?.QWeather?.Host, $request?._waitUntil));
                                         },
@@ -323,7 +323,7 @@ export async function Response($request, $response) {
                                         await matchEnum.init();
                                     }
                                     const enviroments = {
-                                        colorfulClouds: $request?._prefetchedColorfulClouds ?? new ColorfulClouds(providerParameters, Settings?.API?.ColorfulClouds?.Token || "Y2FpeXVuX25vdGlmeQ=="),
+                                        colorfulClouds: $request?._prefetchedColorfulClouds ?? new ColorfulClouds(providerParameters, Settings?.API?.ColorfulClouds?.Token || "Y2FpeXVuX25vdGlmeQ==", $request?._waitUntil),
                                         get qWeather() {
                                             return (this._qWeather ??= new QWeather(providerParameters, Settings?.API?.QWeather?.Token || "bdd98ec1d87747f3a2e8b1741a5af796", Settings?.API?.QWeather?.Host, $request?._waitUntil));
                                         },

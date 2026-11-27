@@ -28,3 +28,14 @@ test("buildArgument strips uppercase-leading query keys and rewrites the request
     assert.equal($request.url, "https://weatherkit.test/api/v3/weather/zh-Hans/22.54/114.06?country=CN&dataSets=currentWeather");
     assert.equal(globalThis.$argument, "LogLevel=DEBUG&country=CN&dataSets=currentWeather", "the original query string stays available as $argument");
 });
+
+test("cleanupResponseHeaders removes hop-by-hop headers regardless of casing", () => {
+    const cleaned = HonoWorkerAdapter.cleanupResponseHeaders({
+        "CONTENT-ENCODING": "gzip",
+        "Content-length": "123",
+        "Transfer-Encoding": "chunked",
+        "Content-Type": "application/json",
+        "X-Custom": "keep",
+    });
+    assert.deepEqual(cleaned, { "Content-Type": "application/json", "X-Custom": "keep" });
+});
